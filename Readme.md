@@ -89,7 +89,7 @@ end
 
 ```
 
-<details><summary>Sequence diagram of a failure with a new build coming in right away</summary>
+**Sequence diagram of a failure with a new build coming in right away**
 
 > :warning: I see a potential conflict here. It could be that GHA1 or GHA2 causes the failure of GHA3, we might not want to accept new LeaseRequests but handle priority across remaining ones
 
@@ -126,69 +126,43 @@ sequenceDiagram
     GHA2->>+LeaseProvider: Aquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: PENDING
 
-    rect rgb(200, 255,200)
+    rect rgb(255, 200, 200)
     note over GHA_NEXT: New GHA run started by GH merge queue after GHA3 failed
+    loop until lease successful and all request marked COMPLETED
     GHA_NEXT->>+LeaseProvider: Aquire: priority:3 
-    note right of LeaseProvider: Full state awareness 
-    LeaseProvider-->>GHA_NEXT: priority: 3, status: AQUIRED
-    note left of GHA_NEXT: holds lease to access shared resource
-
-    GHA_NEXT->>LeaseProvider: Release: priority: 3, status: SUCCESS
-    note right of LeaseProvider: the lease is marked as completed -> status is available on the next requests
-    LeaseProvider-->>-GHA_NEXT: priority: 3, status: COMPLETED
+    note right of LeaseProvider: previous lease failed 
+    LeaseProvider-->>-GHA_NEXT: error, previous lease failed (409 CONFLICT)
+    end
     end
 
-    GHA1->>+LeaseProvider: Aquire: priority: 1
-    LeaseProvider-->>-GHA1: priority: 1, status: COMPLETED
+
+    par    
+    rect rgb(200, 255,200)
     GHA2->>+LeaseProvider: Aquire: priority: 2
-    LeaseProvider-->>-GHA2: priority: 2, status: COMPLETED
-```
-</detail>
-
-<details><summary>Sequence Diagram of a failure and passing the lease to the next LeaseReqeust without a new contendor</summary>
-
-```mermaid
-sequenceDiagram
-    participant LeaseProvider
-    participant GHA1
-    participant GHA2
-    participant GHA3
-
-    
+    note right of LeaseProvider: GHA2 has the highest priority of remaining badges
+    LeaseProvider-->>-GHA2: priority: 2, status: AQUIRED
+    end
+    loop until lease successful
     GHA1->>+LeaseProvider: Aquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
-    GHA2->>+LeaseProvider: Aquire: priority: 2
-    LeaseProvider-->>-GHA2: priority: 2, status: PENDING
-
-    rect rgb(255, 200, 200)
-    GHA3->>+LeaseProvider: Aquire: priority:3 
-    note right of LeaseProvider: Full state awareness 
-    LeaseProvider-->>GHA3: priority: 3, status: AQUIRED
-    note left of GHA3: holds lease to access shared resource
-
-    GHA3->>LeaseProvider: Release: priority: 3, status: FAILURE
-    note right of LeaseProvider: the lease is removed since it failed
-    LeaseProvider-->>-GHA3: priority: 3, status: FAILURE
     end
 
-    note right of GHA1: Assuming sufficient time has passed for stabilize window
-
     rect rgb(200, 255,200)
-
-    GHA2->>+LeaseProvider: Aquire: priority: 2
-    note right of LeaseProvider: Full state awareness 
-    LeaseProvider-->>GHA2: priority: 2, status: AQUIRED
-    note left of GHA2: holds lease to access shared resource
-
-    GHA2->>LeaseProvider: Release: priority: 2, status: SUCCESS
-    note right of LeaseProvider: the lease is marked as completed -> status is available on the next requests
+    GHA2->>+LeaseProvider: Release: priority: 2, status: SUCCESS
+    note right of LeaseProvider: the lease is marked as completed
     LeaseProvider-->>-GHA2: priority: 2, status: COMPLETED
+    end
     end
 
     GHA1->>+LeaseProvider: Aquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: COMPLETED
+
+    GHA_NEXT->>+LeaseProvider: Aquire: priority: <>
+    note left of GHA_NEXT: Priority is recalculated as previous branches were merged
+    LeaseProvider-->>-GHA_NEXT: priority: <>, status: PENDING
 ```
-</detail>
+
+
 
 ### GithubAction
 > :warning: WIP

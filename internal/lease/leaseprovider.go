@@ -148,15 +148,16 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 func (lp *leaseProviderImpl) isWinningLeaseRequest(req *LeaseRequest) *LeaseRequest {
 	// Prereq: we can expect the arg to be already part of the map!
 
-	if lp.aquired != nil {
+	if lp.aquired != nil && !(pointer.StringDeref(lp.aquired.Status, STATUS_AQUIRED) == STATUS_FAILURE) {
 		// Lock already aquired
 		return req
 	}
 	// 1st: we reached the time limit -> lastUpdatedAt + StabilizeDuration > now
 	passedStabilizeDuration := time.Since(lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
 	// 2nd: we received all requests and can take a decision
+	// 3rd: there has been no previous failure
 	reachedExpectedRequestCount := len(lp.known) >= lp.opts.ExpectedRequestCount
-	if !passedStabilizeDuration && !reachedExpectedRequestCount {
+	if lp.aquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
 		return req
 	}
 
@@ -229,7 +230,6 @@ func (lp *leaseProviderImpl) Release(leaseRequest *LeaseRequest) (*LeaseRequest,
 	if status == STATUS_FAILURE {
 		// On failure, drop it. This way the next one can aquire the lease
 		delete(lp.known, req.HeadSHA)
-		lp.aquired = nil
 		return req, nil
 	}
 

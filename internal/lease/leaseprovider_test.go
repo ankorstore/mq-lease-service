@@ -493,11 +493,14 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNewRequest(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req1.Status)
 
-	// A new request is coming in. Since there's no decision on who aquired the lease yet, it can still enter.
-	// With it, we have full knowledge again and it gets the lease.
-	reqNext, err = lp.Aquire(reqNext)
+	// A new request is coming in. Since there has been a previous failure, it should be rejected
+	_, err = lp.Aquire(reqNext)
+	assert.Error(t, err)
+
+	// Request 2 is the highest one in the batch now
+	req2, err = lp.Aquire(req2)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *reqNext.Status)
+	assert.Equal(t, STATUS_AQUIRED, *req2.Status)
 }
 
 func Test_leaseProviderImpl__FullLoop_ReleaseWithNoAquiredLease(t *testing.T) {

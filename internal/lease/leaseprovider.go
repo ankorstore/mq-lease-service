@@ -1,6 +1,7 @@
 package lease
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -9,69 +10,80 @@ import (
 	"k8s.io/utils/pointer"
 )
 
-type LeaseProviderOpts struct {
+type ProviderOpts struct {
 	StabilizeDuration    time.Duration
 	TTL                  time.Duration
 	ExpectedRequestCount int
 }
 
-type LeaseStatus string
+type Status string
 
 const (
-	STATUS_PENDING   = "pending"
-	STATUS_ACQUIRED  = "aquired"
-	STATUS_FAILURE   = "failure"
-	STATUS_SUCCESS   = "success"
-	STATUS_COMPLETED = "completed"
+	StatusPending   = "pending"
+	StatusAcquired  = "acquired"
+	StatusFailure   = "failure"
+	StatusSuccess   = "success"
+	StatusCompleted = "completed"
 )
 
-type LeaseRequest struct {
+type Request struct {
 	HeadSHA    string  `json:"head_sha"`
 	Priority   int     `json:"priority"`
 	Status     *string `json:"status,omitempty"`
 	lastSeenAt *time.Time
 }
 
-func (lr *LeaseRequest) UpdateLastSeenAt() {
+// MarshalZerologObject allows the .Embed log context.
+func (lr *Request) MarshalZerologObject(e *zerolog.Event) {
+	status := ""
+	if lr.Status != nil {
+		status = *lr.Status
+	}
+	e.Str("lease_request_head_sha", lr.HeadSHA).
+		Int("lease_request_priority", lr.Priority).
+		Str("lease_request_status", status)
+}
+
+func (lr *Request) UpdateLastSeenAt() {
 	now := time.Now()
 	lr.lastSeenAt = &now
 }
 
-type LeaseProvider interface {
-	Acquire(LeaseRequest *LeaseRequest) (*LeaseRequest, error)
-	Release(LeaseRequest *LeaseRequest) (*LeaseRequest, error)
-	GetKnown() map[string]*LeaseRequest
+type Provider interface {
+	Acquire(ctx context.Context, LeaseRequest *Request) (*Request, error)
+	Release(ctx context.Context, LeaseRequest *Request) (*Request, error)
+	GetKnown() map[string]*Request
 }
 
 // FIXME this should survive with crashes -> migrate to badger
 type leaseProviderImpl struct {
 	mutex sync.Mutex
-	opts  LeaseProviderOpts
+	opts  ProviderOpts
 
 	lastUpdatedAt time.Time
 
-	aquired *LeaseRequest
-	known   map[string]*LeaseRequest
+	acquired *Request
+	known    map[string]*Request
 }
 
-func NewLeaseProvider(opts LeaseProviderOpts) LeaseProvider {
+func NewLeaseProvider(opts ProviderOpts) Provider {
 	return &leaseProviderImpl{
 		opts:          opts,
 		lastUpdatedAt: time.Now(),
-		known:         make(map[string]*LeaseRequest),
+		known:         make(map[string]*Request),
 	}
 }
 
-func (lp *leaseProviderImpl) GetKnown() map[string]*LeaseRequest {
+func (lp *leaseProviderImpl) GetKnown() map[string]*Request {
 	return lp.known
 }
 
 // evictTTL performs housekeeping based on TTLs and when events have last been received
-func (lp *leaseProviderImpl) evictTTL() {
+func (lp *leaseProviderImpl) evictTTL(ctx context.Context) {
 	for k, v := range lp.known {
-		// Do nothing when status is aquired / success.
-		status := pointer.StringDeref(v.Status, STATUS_PENDING)
-		if status == STATUS_ACQUIRED || status == STATUS_SUCCESS {
+		// Do nothing when status is acquired / success.
+		status := pointer.StringDeref(v.Status, StatusPending)
+		if status == StatusAcquired || status == StatusSuccess {
 			continue
 		}
 		if time.Since(*v.lastSeenAt) > lp.opts.TTL {
@@ -81,25 +93,26 @@ func (lp *leaseProviderImpl) evictTTL() {
 }
 
 // evictSuccess cleanups a successful release event, so the next processing can start!
-func (lp *leaseProviderImpl) cleanup() {
-	// When all commits reported their status, cleanup aquire lock for the next one.
-	if lp.aquired == nil {
+func (lp *leaseProviderImpl) cleanup(ctx context.Context) {
+	// When all commits reported their status, cleanup acquire lock for the next one.
+	if lp.acquired == nil {
 		return
 	}
-	if pointer.StringDeref(lp.aquired.Status, STATUS_ACQUIRED) != STATUS_COMPLETED {
+	if pointer.StringDeref(lp.acquired.Status, StatusAcquired) != StatusCompleted {
 		return
 	}
 	if len(lp.known) == 1 {
 		delete(lp.known, lp.aquired.HeadSHA)
-		lp.aquired = nil
+		delete(lp.known, lp.acquired.HeadSHA)
+		lp.acquired = nil
 	}
 }
 
-func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, error) {
+func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	var updated bool = false
 
 	// Cleanup a potential leftover lease
-	lp.cleanup()
+	lp.cleanup(ctx)
 
 	// Update the last seen timestamp
 	leaseRequest.UpdateLastSeenAt()
@@ -107,16 +120,16 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 	// If we don't have a lease request for this commit, add it
 	if existing, ok := lp.known[leaseRequest.HeadSHA]; !ok {
 
-		if lp.aquired != nil {
-			return nil, errors.New("lease already aquired")
+		if lp.acquired != nil {
+			return nil, errors.New("lease already acquired")
 		}
 
-		if leaseRequest.Status != nil && pointer.StringDeref(leaseRequest.Status, STATUS_PENDING) != STATUS_PENDING {
+		if leaseRequest.Status != nil && pointer.StringDeref(leaseRequest.Status, StatusPending) != StatusPending {
 			return nil, fmt.Errorf("invalid status %s for new LeaseRequest with HeadSHA %s", *leaseRequest.Status, leaseRequest.HeadSHA)
 		}
 
 		lp.known[leaseRequest.HeadSHA] = leaseRequest
-		lp.known[leaseRequest.HeadSHA].Status = pointer.String(STATUS_PENDING)
+		lp.known[leaseRequest.HeadSHA].Status = pointer.String(StatusPending)
 
 	} else {
 		// Priority changed, update it
@@ -126,10 +139,10 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 		}
 
 		// Update the state when it's a whitelisted transition (ACQUIRED -> SUCCESS/FAILURE)
-		existingStatus := pointer.StringDeref(existing.Status, STATUS_PENDING)
-		leaseRequestStatus := pointer.StringDeref(leaseRequest.Status, STATUS_PENDING)
+		existingStatus := pointer.StringDeref(existing.Status, StatusPending)
+		leaseRequestStatus := pointer.StringDeref(leaseRequest.Status, StatusPending)
 		statusMismatch := existingStatus != leaseRequestStatus
-		allowedTransition := (existingStatus == STATUS_ACQUIRED && (leaseRequestStatus == STATUS_SUCCESS || leaseRequestStatus == STATUS_FAILURE))
+		allowedTransition := existingStatus == StatusAcquired && (leaseRequestStatus == StatusSuccess || leaseRequestStatus == StatusFailure)
 		// condition
 		if statusMismatch && allowedTransition {
 			existing.Status = &leaseRequestStatus
@@ -146,15 +159,17 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 		lp.lastUpdatedAt = time.Now()
 	}
 
-	lp.evictTTL()
+	lp.evictTTL(ctx)
 	return lp.known[leaseRequest.HeadSHA], nil
 }
 
-func (lp *leaseProviderImpl) evaluateRequest(req *LeaseRequest) *LeaseRequest {
+func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) *Request {
 	// Prereq: we can expect the arg to be already part of the map!
 
 	if lp.aquired != nil && !(pointer.StringDeref(lp.aquired.Status, STATUS_ACQUIRED) == STATUS_FAILURE) {
-		// Lock already aquired
+
+	if lp.acquired != nil && !(pointer.StringDeref(lp.acquired.Status, StatusAcquired) == StatusFailure) {
+		// Lock already acquired
 		return req
 	}
 	// 1st: we reached the time limit -> lastUpdatedAt + StabilizeDuration > now
@@ -163,6 +178,7 @@ func (lp *leaseProviderImpl) evaluateRequest(req *LeaseRequest) *LeaseRequest {
 	// 3rd: there has been no previous failure
 	reachedExpectedRequestCount := len(lp.known) >= lp.opts.ExpectedRequestCount
 	if lp.aquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
+	if lp.acquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
 		return req
 	}
 
@@ -176,64 +192,64 @@ func (lp *leaseProviderImpl) evaluateRequest(req *LeaseRequest) *LeaseRequest {
 
 	// Got the max priority, now check if we are the winner
 	if req.Priority == maxPriority {
-		req.Status = pointer.String(STATUS_ACQUIRED)
-		lp.aquired = req
+		req.Status = pointer.String(StatusAcquired)
+		lp.acquired = req
 	}
 
 	return req
 }
 
-func (lp *leaseProviderImpl) Acquire(leaseRequest *LeaseRequest) (*LeaseRequest, error) {
+func (lp *leaseProviderImpl) Acquire(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	// Ensure we don't have any collisions
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
 
 	// Insert or get the correct one
-	req, err := lp.insert(leaseRequest)
+	req, err := lp.insert(ctx, leaseRequest)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check if the lease was released successful, let the client know it can die.
-	if lp.aquired != nil && pointer.StringDeref(lp.aquired.Status, STATUS_PENDING) == STATUS_COMPLETED {
-		req.Status = pointer.String(STATUS_COMPLETED)
+	if lp.acquired != nil && pointer.StringDeref(lp.acquired.Status, StatusPending) == StatusCompleted {
+		req.Status = pointer.String(StatusCompleted)
 		delete(lp.known, req.HeadSHA)
 		return req, nil
 	}
 
 	// Return the request object with the correct status
-	return lp.evaluateRequest(req), nil
+	return lp.evaluateRequest(ctx, req), nil
 }
 
-func (lp *leaseProviderImpl) Release(leaseRequest *LeaseRequest) (*LeaseRequest, error) {
+func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
 
-	// There are several occurences when a lease cannot be released
-	// 1. No lease aquired
-	if lp.aquired == nil {
-		return nil, errors.New("no lease aquired")
+	// There are several occurrences when a lease cannot be released
+	// 1. No lease acquired
+	if lp.acquired == nil {
+		return nil, errors.New("no lease acquired")
 	}
 	// 2. Releasing from unknown HeadSHA that does not hold the lease
-	if lp.aquired.HeadSHA != leaseRequest.HeadSHA {
+	if lp.acquired.HeadSHA != leaseRequest.HeadSHA {
 		return nil, fmt.Errorf("commit %s does not hold the lease", leaseRequest.HeadSHA)
 	}
 
 	// At this point in time, we can ingest the lease
-	req, err := lp.insert(leaseRequest)
+	req, err := lp.insert(ctx, leaseRequest)
 	if err != nil {
 		return nil, err
 	}
-	status := pointer.StringDeref(req.Status, STATUS_ACQUIRED)
+	status := pointer.StringDeref(req.Status, StatusAcquired)
 
-	if status == STATUS_SUCCESS {
+	if status == StatusSuccess {
 		// On success, set status to completed so all remaining ones can be removed
-		req.Status = pointer.String(STATUS_COMPLETED)
+		req.Status = pointer.String(StatusCompleted)
 		return req, nil
 	}
 
-	if status == STATUS_FAILURE {
-		// On failure, drop it. This way the next one can aquire the lease
+	if status == StatusFailure {
+		// On failure, drop it. This way the next one can acquire the lease
 		delete(lp.known, req.HeadSHA)
 		return req, nil
 	}

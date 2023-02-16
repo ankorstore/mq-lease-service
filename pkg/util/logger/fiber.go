@@ -18,8 +18,8 @@ func FiberMiddleware(logger zerolog.Logger) fiber.Handler {
 		log := logger.With().Logger()
 
 		// if traceparent is present, add it to the log
-		if traceparent, ok := c.GetReqHeaders()[TraceparentHeaderName]; ok {
-			log = logger.With().Str("traceparent", traceparent).Logger()
+		if traceparent := c.Get(TraceparentHeaderName, ""); traceparent != "" {
+			log = logger.With().Str("req_trace_parent", traceparent).Logger()
 		}
 
 		ctx := log.WithContext(c.UserContext())

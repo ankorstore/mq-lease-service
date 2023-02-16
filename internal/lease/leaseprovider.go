@@ -114,7 +114,7 @@ func (lp *leaseProviderImpl) cleanup(ctx context.Context) {
 func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Inserting new lease request")
 
-	var updated bool = false
+	updated := false
 
 	// Cleanup a potential leftover lease
 	lp.cleanup(ctx)
@@ -135,7 +135,7 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 
 		lp.known[leaseRequest.HeadSHA] = leaseRequest
 		lp.known[leaseRequest.HeadSHA].Status = pointer.String(StatusPending)
-
+		updated = true
 	} else {
 		log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Lease request is already existing")
 		// Priority changed, update it
@@ -161,7 +161,7 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 		}
 
 		log.Ctx(ctx).Debug().EmbedObject(existing).Msg("Lease request updated")
-		return existing, nil
+		updated = true
 	}
 
 	if updated {
@@ -274,5 +274,4 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	}
 
 	return req, fmt.Errorf("unknown condition for commit %s", leaseRequest.HeadSHA)
-
 }

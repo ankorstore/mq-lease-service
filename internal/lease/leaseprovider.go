@@ -131,7 +131,7 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 			updated = true
 		} else if statusMismatch {
 			// status mismatch, we should not get this call
-			return nil, fmt.Errorf("status missmatch for commit %s; expected: `%s`, got: `%s`", leaseRequest.HeadSHA, leaseRequestStatus, leaseRequestStatus)
+			return nil, fmt.Errorf("status missmatch for commit %s; expected: `success|failure`, got: `%s`", leaseRequest.HeadSHA, leaseRequestStatus)
 		}
 
 		return existing, nil

@@ -145,7 +145,7 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 	return lp.known[leaseRequest.HeadSHA], nil
 }
 
-func (lp *leaseProviderImpl) isWinningLeaseRequest(req *LeaseRequest) *LeaseRequest {
+func (lp *leaseProviderImpl) evaluateRequest(req *LeaseRequest) *LeaseRequest {
 	// Prereq: we can expect the arg to be already part of the map!
 
 	if lp.aquired != nil && !(pointer.StringDeref(lp.aquired.Status, STATUS_AQUIRED) == STATUS_FAILURE) {
@@ -197,7 +197,7 @@ func (lp *leaseProviderImpl) Aquire(leaseRequest *LeaseRequest) (*LeaseRequest, 
 	}
 
 	// Return the request object with the correct status
-	return lp.isWinningLeaseRequest(req), nil
+	return lp.evaluateRequest(req), nil
 }
 
 func (lp *leaseProviderImpl) Release(leaseRequest *LeaseRequest) (*LeaseRequest, error) {

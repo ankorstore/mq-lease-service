@@ -7,7 +7,7 @@
 The LeaseProvider is a server that provides the ability to manage distributed leases among multiple github action runs, letting the highest priority run _win_ the lease. This process is helpful when there are multiple runs running that need access to a shared resource. It allows them to agree on the _winner_ of a race for the resource, and subsequently provide the _winner_ with a lease until it is released.
 Depending on the release status (success/failure), the lease is completed and confirmation is awaited or the request from the failing lease is discarded and the process restarts.
 
-It exposes two endpoints:
+It exposes the following endpoints:
 - GET `/healthz` Kubernetes health endpoint
 - GET `/readyz` Kubernetes readiness endpoint
 - GET `/metrics` Prometheus metric endpoint

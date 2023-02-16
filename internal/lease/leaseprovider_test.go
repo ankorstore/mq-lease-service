@@ -213,7 +213,7 @@ func Test_leaseProviderImpl_evictTTL_aquired(t *testing.T) {
 	assert.Equal(t, 1, len(lpImpl.known))
 }
 
-func Test_leaseProviderImpl_isWinningLeaseRequest_timePassed(t *testing.T) {
+func Test_leaseProviderImpl_evaluateRequest_timePassed(t *testing.T) {
 	lp := NewLeaseProvider(&LeaseProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: 1 * time.Minute, ExpectedRequestCount: 4})
 	lpImpl, ok := lp.(*leaseProviderImpl)
 	assert.True(t, ok)
@@ -235,16 +235,16 @@ func Test_leaseProviderImpl_isWinningLeaseRequest_timePassed(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Immediately check if req2 gets the lease (it should not!)
-	_ = lpImpl.isWinningLeaseRequest(req2)
+	_ = lpImpl.evaluateRequest(req2)
 	assert.Equal(t, *req2.Status, STATUS_PENDING)
 
 	// Simulate a time passed by setting the last updated timestamp in the past
 	lpImpl.lastUpdatedAt = time.Now().Add(-2 * time.Minute)
-	_ = lpImpl.isWinningLeaseRequest(req2)
+	_ = lpImpl.evaluateRequest(req2)
 	assert.Equal(t, *req2.Status, STATUS_AQUIRED)
 }
 
-func Test_leaseProviderImpl_isWinningLeaseRequest_reachedExpectedRequestCount(t *testing.T) {
+func Test_leaseProviderImpl_evaluateRequest_reachedExpectedRequestCount(t *testing.T) {
 	lp := NewLeaseProvider(&LeaseProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: 1 * time.Minute, ExpectedRequestCount: 3})
 	lpImpl, ok := lp.(*leaseProviderImpl)
 	assert.True(t, ok)
@@ -269,17 +269,17 @@ func Test_leaseProviderImpl_isWinningLeaseRequest_reachedExpectedRequestCount(t 
 	assert.NoError(t, err)
 
 	// Immediately check if req2 gets the lease (it should not!)
-	_ = lpImpl.isWinningLeaseRequest(req2)
+	_ = lpImpl.evaluateRequest(req2)
 	assert.Equal(t, *req2.Status, STATUS_PENDING)
 
 	// Add 3rd request, making it complete (it has a lower priority compared to req2)
 	_, err = lpImpl.insert(req3)
 	assert.NoError(t, err)
-	_ = lpImpl.isWinningLeaseRequest(req2)
+	_ = lpImpl.evaluateRequest(req2)
 	assert.Equal(t, *req2.Status, STATUS_AQUIRED)
 }
 
-func Test_leaseProviderImpl_isWinningLeaseRequest_errorNoLeaseAssigned(t *testing.T) {
+func Test_leaseProviderImpl_evaluateRequest_errorNoLeaseAssigned(t *testing.T) {
 	lp := NewLeaseProvider(&LeaseProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: 1 * time.Minute, ExpectedRequestCount: 3})
 	lpImpl, ok := lp.(*leaseProviderImpl)
 	assert.True(t, ok)
@@ -305,7 +305,7 @@ func Test_leaseProviderImpl_isWinningLeaseRequest_errorNoLeaseAssigned(t *testin
 	lpImpl.aquired = req2
 
 	// Make sure there's no status modification when checking if a lease is the winner
-	req1copy := lpImpl.isWinningLeaseRequest(&LeaseRequest{
+	req1copy := lpImpl.evaluateRequest(&LeaseRequest{
 		HeadSHA:  req1.HeadSHA,
 		Priority: req1.Priority,
 		Status:   pointer.String(STATUS_PENDING),

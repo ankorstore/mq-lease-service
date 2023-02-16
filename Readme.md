@@ -35,7 +35,7 @@ stateDiagram-v2
     [*] --> PENDING: register the LeaseRequest
     PENDING --> AQUIRED: LeaseRequest is the winner
     PENDING --> COMPLETED: LeaseProvider completed with status success
-    COMPLETED --> [*]: Discard the LeaseRequest
+    COMPLETED --> [*]
     AQUIRED --> SUCCESS: the LeaseRequest is released (success)
     AQUIRED --> FAILURE: the leaseRequest is relesed (failure)
     SUCCESS --> COMPLETED: Update LeaseRequest state
@@ -123,8 +123,6 @@ sequenceDiagram
     note right of GHA1: Assuming not sufficient time has passed for stabilize window
     GHA1->>+LeaseProvider: Aquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
-    GHA2->>+LeaseProvider: Aquire: priority: 2
-    LeaseProvider-->>-GHA2: priority: 2, status: PENDING
 
     rect rgb(255, 200, 200)
     note over GHA_NEXT: New GHA run started by GH merge queue after GHA3 failed

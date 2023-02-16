@@ -1,43 +1,51 @@
 package lease
 
 import (
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/config/server/latest"
 )
 
 const (
-	StabilizeDuration    = time.Minute * 5
-	TTL                  = time.Second * 30
-	ExpectedRequestCount = 4
+	defaultTTL = time.Second * 30
 )
 
-func NewLeaseProviderOrchestrator() LeaseProviderOrchestrator {
+func NewProviderOrchestrator(repositories []*latest.GithubRepositoryConfig) ProviderOrchestrator {
+	leaseProviders := make(map[string]Provider)
+	for _, repository := range repositories {
+		leaseProviders[getKey(repository.Owner, repository.Name, repository.BaseRef)] = NewLeaseProvider(ProviderOpts{
+			StabilizeDuration:    time.Second * time.Duration(repository.StabilizeDuration),
+			TTL:                  defaultTTL,
+			ExpectedRequestCount: repository.ExpectedRequestCount,
+		})
+	}
 	return &leaseProviderOrchestratorImpl{
-		leaseProviders: make(map[string]LeaseProvider),
+		leaseProviders: leaseProviders,
 	}
 }
 
-type LeaseProviderOrchestrator interface {
-	Get(owner string, repo string, baseRef string) LeaseProvider
+type ProviderOrchestrator interface {
+	Get(owner string, repo string, baseRef string) (Provider, error)
+	GetAll() map[string]Provider
 }
 
 type leaseProviderOrchestratorImpl struct {
-	leaseProviders map[string]LeaseProvider
+	leaseProviders map[string]Provider
 }
 
-func (o *leaseProviderOrchestratorImpl) Get(owner string, repo string, baseRef string) LeaseProvider {
+func (o *leaseProviderOrchestratorImpl) GetAll() map[string]Provider {
+	return o.leaseProviders
+}
+
+func (o *leaseProviderOrchestratorImpl) Get(owner string, repo string, baseRef string) (Provider, error) {
 	key := getKey(owner, repo, baseRef)
 	if provider, ok := o.leaseProviders[key]; ok {
-		return provider
+		return provider, nil
 	}
 
-	o.leaseProviders[key] = NewLeaseProvider(LeaseProviderOpts{
-		StabilizeDuration:    StabilizeDuration,
-		TTL:                  TTL,
-		ExpectedRequestCount: ExpectedRequestCount,
-	})
-
-	return o.leaseProviders[key]
+	return nil, errors.New("unknown provider")
 }
 
 func getKey(owner string, repo string, baseRef string) string {

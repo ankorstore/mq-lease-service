@@ -5,9 +5,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func ProviderDetails(orchestrator lease.LeaseProviderOrchestrator) func(c *fiber.Ctx) error {
+func ProviderDetails(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
-		provider := orchestrator.Get(c.Params("owner"), c.Params("repo"), c.Params("baseRef"))
+		provider, fiberErr := getLeaseProviderOrFail(c, orchestrator)
+		if provider == nil {
+			return fiberErr
+		}
 		return c.Status(fiber.StatusOK).JSON(provider.GetKnown())
 	}
 }

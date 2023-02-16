@@ -10,6 +10,7 @@ repos:
         name: go test
         language: system
         entry: make test
+        types: [go]
         pass_filenames: false
       - id: golangci-lint
         name: golangci-lint

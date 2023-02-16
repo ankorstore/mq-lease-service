@@ -1,6 +1,26 @@
 # gh-action-mq-lease-service
 > A priority mutex with stabilisation window and TTLs, designed to work with the Github MergeQueue accessing a shared resource
 
+## Contributing
+
+You will need Go `>= 1.19`
+
+### Install the pre-commit hook
+```shell
+pre-commit install
+```
+
+Pre-commit requirements:
+- `golangci-lint`
+
+### Useful commands
+```shell
+make lint
+make test
+make build
+make run-server # to run the server
+```
+
 ## Components
 
 ### LeaseProvider
@@ -11,7 +31,7 @@ It exposes the following endpoints:
 - GET `/healthz` Kubernetes health endpoint
 - GET `/readyz` Kubernetes readiness endpoint
 - GET `/metrics` Prometheus metric endpoint
-- POST `/:owner/:repo/:baseRef/aquire` for aquiring a lease (poll until status is aquired or completed)
+- POST `/:owner/:repo/:baseRef/aquire` for aquiring a lease (poll until status is acquired or completed)
 - POST `/:owner/:repo/:baseRef/release` for releasing a lease (the winnder informs the LeaseProvider with the end result)
 
 The payload and response (_LeaseRequest_) is encoded as JSON and follows this scheme:
@@ -19,7 +39,7 @@ The payload and response (_LeaseRequest_) is encoded as JSON and follows this sc
 {
   "head_sha": "...",
   "priority" 0,
-  "status": "(optional) pending|aquired|failure|success|completed"
+  "status": "(optional) pending|acquired|failure|success|completed"
 }
 ```
 
@@ -55,25 +75,25 @@ sequenceDiagram
     participant GHA2
     participant GHA3
 
-    GHA3->>+LeaseProvider: Acquire: priority: 3 
+    GHA3->>+LeaseProvider: Acquire: priority: 3
     note right of LeaseProvider: No full state awareness (yet)
     LeaseProvider-->>-GHA3: priority: 2, status: PENDING
-    
+
     par
-    loop until aquired lease is released or aquired
+    loop until acquired lease is released or acquired
     GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
     end
-    
-    loop until aquired lease is released or aquired
+
+    loop until acquired lease is released or acquired
     GHA2->>+LeaseProvider: Acquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: PENDING
     end
-    
+
 
     rect rgb(191, 223, 255)
-    GHA3->>+LeaseProvider: Acquire: priority:3 
-    note right of LeaseProvider: Full state awareness 
+    GHA3->>+LeaseProvider: Acquire: priority:3
+    note right of LeaseProvider: Full state awareness
     LeaseProvider-->>GHA3: priority: 3, status: ACQUIRED
     note left of GHA3: holds lease to access shared resource
 
@@ -82,7 +102,7 @@ sequenceDiagram
     LeaseProvider-->>-GHA3: priority: 3, status: COMPLETED
     end
 end
-    
+
     GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: COMPLETED
 
@@ -105,15 +125,15 @@ sequenceDiagram
     participant GHA3
     participant GHA_NEXT
 
-    
+
     GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
     GHA2->>+LeaseProvider: Acquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: PENDING
 
     rect rgb(255, 200, 200)
-    GHA3->>+LeaseProvider: Acquire: priority:3 
-    note right of LeaseProvider: Full state awareness 
+    GHA3->>+LeaseProvider: Acquire: priority:3
+    note right of LeaseProvider: Full state awareness
     LeaseProvider-->>GHA3: priority: 3, status: ACQUIRED
     note left of GHA3: holds lease to access shared resource
 
@@ -129,14 +149,14 @@ sequenceDiagram
     rect rgb(255, 200, 200)
     note over GHA_NEXT: New GHA run started by GH merge queue after GHA3 failed
     loop until lease successful and all request marked COMPLETED
-    GHA_NEXT->>+LeaseProvider: Acquire: priority:3 
-    note right of LeaseProvider: previous lease failed 
+    GHA_NEXT->>+LeaseProvider: Acquire: priority:3
+    note right of LeaseProvider: previous lease failed
     LeaseProvider-->>-GHA_NEXT: error, previous lease failed (409 CONFLICT)
     end
     end
 
 
-    par    
+    par
     rect rgb(200, 255,200)
     GHA2->>+LeaseProvider: Acquire: priority: 2
     note right of LeaseProvider: GHA2 has the highest priority of remaining badges

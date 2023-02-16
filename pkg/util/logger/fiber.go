@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,22 +13,19 @@ const (
 )
 
 func FiberMiddleware(logger zerolog.Logger) fiber.Handler {
-
 	return func(c *fiber.Ctx) error {
-
 		log := logger.With().Logger()
 
 		// if traceparent is present, add it to the log
 		if traceparent := c.Get(TraceparentHeaderName, ""); traceparent != "" {
 			log = logger.With().Str("req_trace_parent", traceparent).Logger()
 		}
-
 		ctx := log.WithContext(c.UserContext())
 		c.SetUserContext(ctx)
 
 		start := time.Now()
 
-		msg := ""
+		msg := "Request"
 		err := c.Next()
 		if err != nil {
 			msg = err.Error()
@@ -35,19 +33,22 @@ func FiberMiddleware(logger zerolog.Logger) fiber.Handler {
 		}
 
 		log = log.With().
-			Int("status", c.Response().StatusCode()).
-			Str("latency", time.Since(start).String()).
-			Str("method", c.Method()).
-			Str("path", c.Path()).
-			Str("protocol", c.Protocol()).
+			Int("req_status", c.Response().StatusCode()).
+			Str("req_latency", fmt.Sprintf("%.3f", float64(time.Since(start).Microseconds())/1000)).
+			Str("req_method", c.Method()).
+			Str("req_ip", c.IP()).
+			Str("req_path", c.Path()).
+			Str("req_proto", c.Protocol()).
+			Str("req_user_agent", c.Get(fiber.HeaderUserAgent)).
 			Logger()
 
 		// Set loglevel based on status code
-		if c.Response().StatusCode() >= fiber.StatusInternalServerError {
+		switch {
+		case c.Response().StatusCode() >= fiber.StatusInternalServerError:
 			log.Error().Msg(msg)
-		} else if c.Response().StatusCode() >= fiber.StatusBadRequest {
+		case c.Response().StatusCode() >= fiber.StatusBadRequest:
 			log.Warn().Msg(msg)
-		} else {
+		default:
 			log.Info().Msg(msg)
 		}
 

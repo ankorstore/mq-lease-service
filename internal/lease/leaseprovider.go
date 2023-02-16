@@ -62,7 +62,7 @@ type leaseProviderImpl struct {
 	mutex sync.Mutex
 	opts  ProviderOpts
 
-	lastUpdatedAt time.Time
+	lastUpdatedAt *time.Time
 
 	acquired *Request
 	known    map[string]*Request
@@ -71,7 +71,7 @@ type leaseProviderImpl struct {
 func NewLeaseProvider(opts ProviderOpts) Provider {
 	return &leaseProviderImpl{
 		opts:          opts,
-		lastUpdatedAt: time.Now(),
+		lastUpdatedAt: nil,
 		known:         make(map[string]*Request),
 	}
 }
@@ -165,7 +165,8 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 	}
 
 	if updated {
-		lp.lastUpdatedAt = time.Now()
+		now := time.Now()
+		lp.lastUpdatedAt = &now
 		log.Ctx(ctx).Debug().Msgf("Provider last updated time bumped (new time: %s, StabilizeDuration now ends at %s)", lp.lastUpdatedAt.Format(time.RFC3339), lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration).Format(time.RFC3339))
 	}
 
@@ -184,7 +185,7 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 		return req
 	}
 	// 1st: we reached the time limit -> lastUpdatedAt + StabilizeDuration > now
-	passedStabilizeDuration := time.Since(lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
+	passedStabilizeDuration := time.Since(*lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
 	log.Ctx(ctx).Debug().Msg("Now: " + time.Now().Format(time.RFC3339))
 	log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Stabilize duration check: Duration config: %.0fs, Last updated at: %s, Stabilize duration end: %s, Stabilize duration passed: %t", lp.opts.StabilizeDuration.Seconds(), lp.lastUpdatedAt.Format(time.RFC3339), lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration).Format(time.RFC3339), passedStabilizeDuration)
 	// 2nd: we received all requests and can take a decision

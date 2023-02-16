@@ -8,6 +8,9 @@ The LeaseProvider is a server that provides the ability to manage distributed le
 Depending on the release status (success/failure), the lease is completed and confirmation is awaited or the request from the failing lease is discarded and the process restarts.
 
 It exposes two endpoints:
+- GET `/healthz` Kubernetes health endpoint
+- GET `/readyz` Kubernetes readiness endpoint
+- GET `/metrics` Prometheus metric endpoint
 - POST `/:owner/:repo/:baseRef/aquire` for aquiring a lease (poll until status is aquired or completed)
 - POST `/:owner/:repo/:baseRef/release` for releasing a lease (the winnder informs the LeaseProvider with the end result)
 
@@ -19,6 +22,12 @@ The payload and response (_LeaseRequest_) is encoded as JSON and follows this sc
   "status": "(optional) pending|aquired|failure|success|completed"
 }
 ```
+
+Configuration options:
+- `--port` (8080)
+- `--stabilisation-window` (5m) - time to wait before giving out a lease without all expected PRs being in the merge queue
+- `--ttl` (30s) - time to wait before considering an aquire interest being stale
+- `--expected-build-count` (4) - number of parallel builds to be expected for a given merge group
 
 #### STM of status transformations
 ```mermaid
@@ -33,8 +42,10 @@ stateDiagram-v2
     FAILURE --> [*]: the LeaseRequest is discarded
 ```
 
-#### Sequence diagram of a successful run
-> Note: assuming a number of 3 parallel builds
+#### Sequence diagrams
+> Note: assuming 3 parallel builds
+
+**Successful run:**
 ```mermaid
 sequenceDiagram
     participant LeaseProvider
@@ -78,9 +89,8 @@ end
 
 ```
 
-<details><summary>Additional Sequence Diagrams of different scnearios</summary>
+<details><summary>Sequence diagram of a failure with a new build coming in right away</summary>
 
-#### Sequence diagram of a failure with a new build coming in right away
 > :warning: I see a potential conflict here. It could be that GHA1 or GHA2 causes the failure of GHA3, we might not want to accept new LeaseRequests but handle priority across remaining ones
 
 > Note: Expecting full status of 3 parallel builds and a new build immediately starting after the last one failed (GHA3). Also, this sequence diagram does not cover any parallel calls from github actions.
@@ -133,8 +143,9 @@ sequenceDiagram
     GHA2->>+LeaseProvider: Aquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: COMPLETED
 ```
+</detail>
 
-#### Sequence Diagram of a failure and passing the lease to the next LeaseReqeust without a new contendor
+<details><summary>Sequence Diagram of a failure and passing the lease to the next LeaseReqeust without a new contendor</summary>
 
 ```mermaid
 sequenceDiagram

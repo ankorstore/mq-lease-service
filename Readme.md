@@ -39,7 +39,7 @@ stateDiagram-v2
     PENDING --> COMPLETED: LeaseProvider completed with status success
     COMPLETED --> [*]
     AQUIRED --> SUCCESS: the LeaseRequest is released (success)
-    AQUIRED --> FAILURE: the leaseRequest is relesed (failure)
+    AQUIRED --> FAILURE: the leaseRequest is released (failure)
     SUCCESS --> COMPLETED: Update LeaseRequest state
     FAILURE --> [*]: the LeaseRequest is discarded
 ```

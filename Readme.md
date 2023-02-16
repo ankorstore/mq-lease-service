@@ -35,11 +35,11 @@ Configuration options:
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: register the LeaseRequest
-    PENDING --> AQUIRED: LeaseRequest is the winner
+    PENDING --> ACQUIRED: LeaseRequest is the winner
     PENDING --> COMPLETED: LeaseProvider completed with status success
     COMPLETED --> [*]
-    AQUIRED --> SUCCESS: the LeaseRequest is released (success)
-    AQUIRED --> FAILURE: the leaseRequest is released (failure)
+    ACQUIRED --> SUCCESS: the LeaseRequest is released (success)
+    ACQUIRED --> FAILURE: the leaseRequest is released (failure)
     SUCCESS --> COMPLETED: Update LeaseRequest state
     FAILURE --> [*]: the LeaseRequest is discarded
 ```
@@ -55,26 +55,26 @@ sequenceDiagram
     participant GHA2
     participant GHA3
 
-    GHA3->>+LeaseProvider: Aquire: priority: 3 
+    GHA3->>+LeaseProvider: Acquire: priority: 3 
     note right of LeaseProvider: No full state awareness (yet)
     LeaseProvider-->>-GHA3: priority: 2, status: PENDING
     
     par
     loop until aquired lease is released or aquired
-    GHA1->>+LeaseProvider: Aquire: priority: 1
+    GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
     end
     
     loop until aquired lease is released or aquired
-    GHA2->>+LeaseProvider: Aquire: priority: 2
+    GHA2->>+LeaseProvider: Acquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: PENDING
     end
     
 
     rect rgb(191, 223, 255)
-    GHA3->>+LeaseProvider: Aquire: priority:3 
+    GHA3->>+LeaseProvider: Acquire: priority:3 
     note right of LeaseProvider: Full state awareness 
-    LeaseProvider-->>GHA3: priority: 3, status: AQUIRED
+    LeaseProvider-->>GHA3: priority: 3, status: ACQUIRED
     note left of GHA3: holds lease to access shared resource
 
     GHA3->>LeaseProvider: Release: priority: 3, status: SUCCESS
@@ -83,10 +83,10 @@ sequenceDiagram
     end
 end
     
-    GHA1->>+LeaseProvider: Aquire: priority: 1
+    GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: COMPLETED
 
-    GHA2->>+LeaseProvider: Aquire: priority: 2
+    GHA2->>+LeaseProvider: Acquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: COMPLETED
 
 ```
@@ -106,15 +106,15 @@ sequenceDiagram
     participant GHA_NEXT
 
     
-    GHA1->>+LeaseProvider: Aquire: priority: 1
+    GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
-    GHA2->>+LeaseProvider: Aquire: priority: 2
+    GHA2->>+LeaseProvider: Acquire: priority: 2
     LeaseProvider-->>-GHA2: priority: 2, status: PENDING
 
     rect rgb(255, 200, 200)
-    GHA3->>+LeaseProvider: Aquire: priority:3 
+    GHA3->>+LeaseProvider: Acquire: priority:3 
     note right of LeaseProvider: Full state awareness 
-    LeaseProvider-->>GHA3: priority: 3, status: AQUIRED
+    LeaseProvider-->>GHA3: priority: 3, status: ACQUIRED
     note left of GHA3: holds lease to access shared resource
 
     GHA3->>LeaseProvider: Release: priority: 3, status: FAILURE
@@ -123,13 +123,13 @@ sequenceDiagram
     end
 
     note right of GHA1: Assuming not sufficient time has passed for stabilize window
-    GHA1->>+LeaseProvider: Aquire: priority: 1
+    GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
 
     rect rgb(255, 200, 200)
     note over GHA_NEXT: New GHA run started by GH merge queue after GHA3 failed
     loop until lease successful and all request marked COMPLETED
-    GHA_NEXT->>+LeaseProvider: Aquire: priority:3 
+    GHA_NEXT->>+LeaseProvider: Acquire: priority:3 
     note right of LeaseProvider: previous lease failed 
     LeaseProvider-->>-GHA_NEXT: error, previous lease failed (409 CONFLICT)
     end
@@ -138,12 +138,12 @@ sequenceDiagram
 
     par    
     rect rgb(200, 255,200)
-    GHA2->>+LeaseProvider: Aquire: priority: 2
+    GHA2->>+LeaseProvider: Acquire: priority: 2
     note right of LeaseProvider: GHA2 has the highest priority of remaining badges
-    LeaseProvider-->>-GHA2: priority: 2, status: AQUIRED
+    LeaseProvider-->>-GHA2: priority: 2, status: ACQUIRED
     end
     loop until lease successful
-    GHA1->>+LeaseProvider: Aquire: priority: 1
+    GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: PENDING
     end
 
@@ -154,10 +154,10 @@ sequenceDiagram
     end
     end
 
-    GHA1->>+LeaseProvider: Aquire: priority: 1
+    GHA1->>+LeaseProvider: Acquire: priority: 1
     LeaseProvider-->>-GHA1: priority: 1, status: COMPLETED
 
-    GHA_NEXT->>+LeaseProvider: Aquire: priority: <>
+    GHA_NEXT->>+LeaseProvider: Acquire: priority: <>
     note left of GHA_NEXT: Priority is recalculated as previous branches were merged
     LeaseProvider-->>-GHA_NEXT: priority: <>, status: PENDING
 ```

@@ -19,7 +19,7 @@ type LeaseStatus string
 
 const (
 	STATUS_PENDING   = "pending"
-	STATUS_AQUIRED   = "aquired"
+	STATUS_ACQUIRED  = "aquired"
 	STATUS_FAILURE   = "failure"
 	STATUS_SUCCESS   = "success"
 	STATUS_COMPLETED = "completed"
@@ -38,14 +38,15 @@ func (lr *LeaseRequest) UpdateLastSeenAt() {
 }
 
 type LeaseProvider interface {
-	Aquire(LeaseRequest *LeaseRequest) (*LeaseRequest, error)
+	Acquire(LeaseRequest *LeaseRequest) (*LeaseRequest, error)
 	Release(LeaseRequest *LeaseRequest) (*LeaseRequest, error)
+	GetKnown() map[string]*LeaseRequest
 }
 
 // FIXME this should survive with crashes -> migrate to badger
 type leaseProviderImpl struct {
 	mutex sync.Mutex
-	opts  *LeaseProviderOpts
+	opts  LeaseProviderOpts
 
 	lastUpdatedAt time.Time
 
@@ -53,7 +54,7 @@ type leaseProviderImpl struct {
 	known   map[string]*LeaseRequest
 }
 
-func NewLeaseProvider(opts *LeaseProviderOpts) LeaseProvider {
+func NewLeaseProvider(opts LeaseProviderOpts) LeaseProvider {
 	return &leaseProviderImpl{
 		opts:          opts,
 		lastUpdatedAt: time.Now(),
@@ -61,12 +62,16 @@ func NewLeaseProvider(opts *LeaseProviderOpts) LeaseProvider {
 	}
 }
 
+func (lp *leaseProviderImpl) GetKnown() map[string]*LeaseRequest {
+	return lp.known
+}
+
 // evictTTL performs housekeeping based on TTLs and when events have last been received
 func (lp *leaseProviderImpl) evictTTL() {
 	for k, v := range lp.known {
 		// Do nothing when status is aquired / success.
 		status := pointer.StringDeref(v.Status, STATUS_PENDING)
-		if status == STATUS_AQUIRED || status == STATUS_SUCCESS {
+		if status == STATUS_ACQUIRED || status == STATUS_SUCCESS {
 			continue
 		}
 		if time.Since(*v.lastSeenAt) > lp.opts.TTL {
@@ -81,7 +86,7 @@ func (lp *leaseProviderImpl) cleanup() {
 	if lp.aquired == nil {
 		return
 	}
-	if pointer.StringDeref(lp.aquired.Status, STATUS_AQUIRED) != STATUS_COMPLETED {
+	if pointer.StringDeref(lp.aquired.Status, STATUS_ACQUIRED) != STATUS_COMPLETED {
 		return
 	}
 	if len(lp.known) == 1 {
@@ -120,11 +125,11 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 			updated = true
 		}
 
-		// Update the state when it's a whitelisted transition (AQUIRED -> SUCCESS/FAILURE)
+		// Update the state when it's a whitelisted transition (ACQUIRED -> SUCCESS/FAILURE)
 		existingStatus := pointer.StringDeref(existing.Status, STATUS_PENDING)
 		leaseRequestStatus := pointer.StringDeref(leaseRequest.Status, STATUS_PENDING)
 		statusMismatch := existingStatus != leaseRequestStatus
-		allowedTransition := (existingStatus == STATUS_AQUIRED && (leaseRequestStatus == STATUS_SUCCESS || leaseRequestStatus == STATUS_FAILURE))
+		allowedTransition := (existingStatus == STATUS_ACQUIRED && (leaseRequestStatus == STATUS_SUCCESS || leaseRequestStatus == STATUS_FAILURE))
 		// condition
 		if statusMismatch && allowedTransition {
 			existing.Status = &leaseRequestStatus
@@ -148,7 +153,7 @@ func (lp *leaseProviderImpl) insert(leaseRequest *LeaseRequest) (*LeaseRequest, 
 func (lp *leaseProviderImpl) evaluateRequest(req *LeaseRequest) *LeaseRequest {
 	// Prereq: we can expect the arg to be already part of the map!
 
-	if lp.aquired != nil && !(pointer.StringDeref(lp.aquired.Status, STATUS_AQUIRED) == STATUS_FAILURE) {
+	if lp.aquired != nil && !(pointer.StringDeref(lp.aquired.Status, STATUS_ACQUIRED) == STATUS_FAILURE) {
 		// Lock already aquired
 		return req
 	}
@@ -171,14 +176,14 @@ func (lp *leaseProviderImpl) evaluateRequest(req *LeaseRequest) *LeaseRequest {
 
 	// Got the max priority, now check if we are the winner
 	if req.Priority == maxPriority {
-		req.Status = pointer.String(STATUS_AQUIRED)
+		req.Status = pointer.String(STATUS_ACQUIRED)
 		lp.aquired = req
 	}
 
 	return req
 }
 
-func (lp *leaseProviderImpl) Aquire(leaseRequest *LeaseRequest) (*LeaseRequest, error) {
+func (lp *leaseProviderImpl) Acquire(leaseRequest *LeaseRequest) (*LeaseRequest, error) {
 	// Ensure we don't have any collisions
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
@@ -219,7 +224,7 @@ func (lp *leaseProviderImpl) Release(leaseRequest *LeaseRequest) (*LeaseRequest,
 	if err != nil {
 		return nil, err
 	}
-	status := pointer.StringDeref(req.Status, STATUS_AQUIRED)
+	status := pointer.StringDeref(req.Status, STATUS_ACQUIRED)
 
 	if status == STATUS_SUCCESS {
 		// On success, set status to completed so all remaining ones can be removed

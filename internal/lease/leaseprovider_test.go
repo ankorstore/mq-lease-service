@@ -87,7 +87,7 @@ func Test_leaseProviderImpl_insert_invalid_state_new(t *testing.T) {
 	lpImpl, ok := lp.(*leaseProviderImpl)
 	assert.True(t, ok)
 
-	for _, state := range []string{STATUS_AQUIRED, STATUS_COMPLETED, STATUS_FAILURE, STATUS_SUCCESS} {
+	for _, state := range []string{STATUS_ACQUIRED, STATUS_COMPLETED, STATUS_FAILURE, STATUS_SUCCESS} {
 		req := &LeaseRequest{
 			HeadSHA:  "sha1",
 			Priority: 10,
@@ -110,9 +110,9 @@ func Test_leaseProviderImpl_insert_valid_state_transition(t *testing.T) {
 	_, err := lpImpl.insert(req)
 	assert.NoError(t, err)
 
-	for _, status := range []string{STATUS_FAILURE, STATUS_SUCCESS, STATUS_AQUIRED} {
+	for _, status := range []string{STATUS_FAILURE, STATUS_SUCCESS, STATUS_ACQUIRED} {
 		// Manually set aquired state. It's a pointer -> it's auto updated in the state
-		req.Status = pointer.String(STATUS_AQUIRED)
+		req.Status = pointer.String(STATUS_ACQUIRED)
 		lpImpl.aquired = req
 
 		updateReq := &LeaseRequest{
@@ -138,7 +138,7 @@ func Test_leaseProviderImpl_insert_invalid_state_transition(t *testing.T) {
 	assert.NoError(t, err)
 
 	for _, previousStatus := range []string{STATUS_PENDING, STATUS_COMPLETED, STATUS_FAILURE, STATUS_SUCCESS} {
-		for _, status := range []string{STATUS_FAILURE, STATUS_SUCCESS, STATUS_AQUIRED} {
+		for _, status := range []string{STATUS_FAILURE, STATUS_SUCCESS, STATUS_ACQUIRED} {
 			// Manually set previous state. It's a pointer -> it's auto updated in the state
 			req.Status = pointer.String(previousStatus)
 
@@ -205,7 +205,7 @@ func Test_leaseProviderImpl_evictTTL_aquired(t *testing.T) {
 
 	aheadOfTime := time.Now().Add(-100 * time.Second)
 	req.lastSeenAt = &aheadOfTime
-	req.Status = pointer.String(STATUS_AQUIRED)
+	req.Status = pointer.String(STATUS_ACQUIRED)
 	lpImpl.aquired = req
 
 	// Despite being outdated, this key should not be evicted!
@@ -241,7 +241,7 @@ func Test_leaseProviderImpl_evaluateRequest_timePassed(t *testing.T) {
 	// Simulate a time passed by setting the last updated timestamp in the past
 	lpImpl.lastUpdatedAt = time.Now().Add(-2 * time.Minute)
 	_ = lpImpl.evaluateRequest(req2)
-	assert.Equal(t, *req2.Status, STATUS_AQUIRED)
+	assert.Equal(t, *req2.Status, STATUS_ACQUIRED)
 }
 
 func Test_leaseProviderImpl_evaluateRequest_reachedExpectedRequestCount(t *testing.T) {
@@ -276,7 +276,7 @@ func Test_leaseProviderImpl_evaluateRequest_reachedExpectedRequestCount(t *testi
 	_, err = lpImpl.insert(req3)
 	assert.NoError(t, err)
 	_ = lpImpl.evaluateRequest(req2)
-	assert.Equal(t, *req2.Status, STATUS_AQUIRED)
+	assert.Equal(t, *req2.Status, STATUS_ACQUIRED)
 }
 
 func Test_leaseProviderImpl_evaluateRequest_errorNoLeaseAssigned(t *testing.T) {
@@ -301,7 +301,7 @@ func Test_leaseProviderImpl_evaluateRequest_errorNoLeaseAssigned(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Set req2 to be the aquired lesae
-	req2.Status = pointer.String(STATUS_AQUIRED)
+	req2.Status = pointer.String(STATUS_ACQUIRED)
 	lpImpl.aquired = req2
 
 	// Make sure there's no status modification when checking if a lease is the winner
@@ -340,24 +340,24 @@ func Test_leaseProviderImpl__FullLoop_ReleaseSuccess(t *testing.T) {
 		Priority: 1,
 	}
 
-	req1, err := lp.Aquire(req1)
+	req1, err := lp.Acquire(req1)
 	assert.NoError(t, err)
 
-	req3, err = lp.Aquire(req3)
+	req3, err = lp.Acquire(req3)
 	assert.NoError(t, err)
 
 	// Add last remaining request. The system has full knowledge now but req2 is not the winner -> should have the status pending
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req2.Status)
 
 	// Check for req3, the winner
-	req3, err = lp.Aquire(req3)
+	req3, err = lp.Acquire(req3)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *req3.Status)
+	assert.Equal(t, STATUS_ACQUIRED, *req3.Status)
 
 	// The reqNext will now be rejected, since the lease aquiring is locked and we're awaiting all other leases to return
-	_, err = lp.Aquire(reqNext)
+	_, err = lp.Acquire(reqNext)
 	assert.Error(t, err)
 
 	// Report success status for req3
@@ -366,21 +366,21 @@ func Test_leaseProviderImpl__FullLoop_ReleaseSuccess(t *testing.T) {
 	assert.Equal(t, STATUS_COMPLETED, *req3.Status)
 
 	// Now, all other LeaseRequests will get the status COMPLETED assigned -> the process can die
-	req1, err = lp.Aquire(req1)
+	req1, err = lp.Acquire(req1)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_COMPLETED, *req1.Status)
 
 	// The reqNext should still fail as confirmation or timeout of req2 is awaited
-	_, err = lp.Aquire(reqNext)
+	_, err = lp.Acquire(reqNext)
 	assert.Error(t, err)
 
 	// Last remaining request, send COMPLETE and afterwards the next distributed lease can start
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_COMPLETED, *req2.Status)
 
 	// Now, all leases are marked as successful / released. the reqNew should now be accepted
-	_, err = lp.Aquire(reqNext)
+	_, err = lp.Acquire(reqNext)
 	assert.NoError(t, err)
 
 }
@@ -408,21 +408,21 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNoNewRequest(t *testing.T) {
 		Status:   pointer.String(STATUS_FAILURE),
 	}
 
-	req1, err := lp.Aquire(req1)
+	req1, err := lp.Acquire(req1)
 	assert.NoError(t, err)
 
-	req3, err = lp.Aquire(req3)
+	req3, err = lp.Acquire(req3)
 	assert.NoError(t, err)
 
 	// Add last remaining request. The system has full knowledge now but req2 is not the winner -> should have the status pending
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req2.Status)
 
 	// Check for req3, the winner
-	req3, err = lp.Aquire(req3)
+	req3, err = lp.Acquire(req3)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *req3.Status)
+	assert.Equal(t, STATUS_ACQUIRED, *req3.Status)
 
 	// Report failure status for req3
 	req3, err = lp.Release(req3failure)
@@ -430,16 +430,16 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNoNewRequest(t *testing.T) {
 	assert.Equal(t, STATUS_FAILURE, *req3.Status)
 
 	// The lease is released, but we did not have a successful outcome -> pass it to the next one waiting. It's not req1
-	req1, err = lp.Aquire(req1)
+	req1, err = lp.Acquire(req1)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req1.Status)
 
 	// req2 has the highest priority -> it gets the lease (assuming sufficient time passed)
 	// (note: backdate the stabilisation duration)
 	lpImpl.lastUpdatedAt = time.Now().Add(-100 * time.Minute)
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *req2.Status)
+	assert.Equal(t, STATUS_ACQUIRED, *req2.Status)
 }
 
 func Test_leaseProviderImpl__FullLoop_ReleaseFailedNewRequest(t *testing.T) {
@@ -467,21 +467,21 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNewRequest(t *testing.T) {
 		Priority: 4,
 	}
 
-	req1, err := lp.Aquire(req1)
+	req1, err := lp.Acquire(req1)
 	assert.NoError(t, err)
 
-	req3, err = lp.Aquire(req3)
+	req3, err = lp.Acquire(req3)
 	assert.NoError(t, err)
 
 	// Add last remaining request. The system has full knowledge now but req2 is not the winner -> should have the status pending
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req2.Status)
 
 	// Check for req3, the winner
-	req3, err = lp.Aquire(req3)
+	req3, err = lp.Acquire(req3)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *req3.Status)
+	assert.Equal(t, STATUS_ACQUIRED, *req3.Status)
 
 	// Report failure status for req3
 	req3, err = lp.Release(req3failure)
@@ -489,21 +489,21 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNewRequest(t *testing.T) {
 	assert.Equal(t, STATUS_FAILURE, *req3.Status)
 
 	// The lease is released, but we did not have a successful outcome -> pass it to the next one waiting. It's not req1
-	req1, err = lp.Aquire(req1)
+	req1, err = lp.Acquire(req1)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req1.Status)
 
 	// A new request is coming in. Since there has been a previous failure, it should be rejected
-	_, err = lp.Aquire(reqNext)
+	_, err = lp.Acquire(reqNext)
 	assert.Error(t, err)
 
 	// Request 2 is the highest one in the batch now
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *req2.Status)
+	assert.Equal(t, STATUS_ACQUIRED, *req2.Status)
 }
 
-func Test_leaseProviderImpl__FullLoop_ReleaseWithNoAquiredLease(t *testing.T) {
+func Test_leaseProviderImpl__FullLoop_ReleaseWithNoAcquiredLease(t *testing.T) {
 	lp := NewLeaseProvider(&LeaseProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: time.Minute, ExpectedRequestCount: 3})
 
 	req1 := &LeaseRequest{
@@ -516,10 +516,10 @@ func Test_leaseProviderImpl__FullLoop_ReleaseWithNoAquiredLease(t *testing.T) {
 	}
 
 	// Inject the two requests
-	req1, err := lp.Aquire(req1)
+	req1, err := lp.Acquire(req1)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req1.Status)
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req2.Status)
 
@@ -545,12 +545,12 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFromInvalidHeadSHA(t *testing.T) {
 	}
 
 	// Inject the two requests
-	req1, err := lp.Aquire(req1)
+	req1, err := lp.Acquire(req1)
 	assert.NoError(t, err)
 	assert.Equal(t, STATUS_PENDING, *req1.Status)
-	req2, err = lp.Aquire(req2)
+	req2, err = lp.Acquire(req2)
 	assert.NoError(t, err)
-	assert.Equal(t, STATUS_AQUIRED, *req2.Status)
+	assert.Equal(t, STATUS_ACQUIRED, *req2.Status)
 
 	// Try to release. There should be no lease, thus error
 	_, err = lp.Release(&LeaseRequest{

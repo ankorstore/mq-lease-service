@@ -30,6 +30,8 @@ Configuration options:
 - `--expected-build-count` (4) - number of parallel builds to be expected for a given merge group
 
 #### STM of status transformations
+> Note: this is the STM of a LeaseRequest, the LeaseProvider is a bit more complicated but should be a STM at the very end
+
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: register the LeaseRequest

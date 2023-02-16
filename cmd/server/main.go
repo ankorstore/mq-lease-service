@@ -7,7 +7,7 @@ import (
 
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/config"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/lease"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/server/handlers"
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/server"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/version"
 	"github.com/ankorstore/gh-action-mq-lease-service/pkg/util/logger"
 	"github.com/gofiber/fiber/v2"
@@ -39,12 +39,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	orchestrator := lease.NewLeaseProviderOrchestrator()
+	// Lease provider orchestrator (handling all repos merge queue leases)
+	orchestrator := lease.NewProviderOrchestrator(cfg.Repositories)
 
-	app.Post("/:owner/:repo/:baseRef/acquire", handlers.Acquire(orchestrator))
-	app.Post("/:owner/:repo/:baseRef/release", handlers.Release(orchestrator))
+	// Fiber app
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(logger.FiberMiddleware(log))
+	server.RegisterRoutes(app, orchestrator)
 
-	app.Get("/:owner/:repo/:baseRef", handlers.ProviderDetails(orchestrator))
+	log.Info().Msg("Bootstrap completed, starting...")
 
 	if err := app.Listen(":" + strconv.Itoa(int(serverPort))); err != nil {
 		log.Err(err).Msg("Fiber server failed")

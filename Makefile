@@ -1,3 +1,8 @@
+DEBUG ?= false
+LEASE_SERVICE_PORT ?= 9000
+
+GOOS := $(shell go env GOOS)
+GOARCH := $(shell go env GOARCH)
 
 default: clean lint test build
 
@@ -13,9 +18,11 @@ clean:  ## cleanup test cover output
 	rm -rf cover.out
 
 test:  ## run unit tests
-	go test -race -cover $(shell go list ./...)
+	go test -race -cover ./...
 
 .PHONY: build
+build:  ## build the application (server & cli)
+	goreleaser build --snapshot --clean --single-target
 
-build:
-	goreleaser build --snapshot --rm-dist --single-target
+run-server: build  ## run the server with an example config
+	 ./dist/server_${GOOS}_${GOARCH}/server -config=hack/example-server-config.yaml -log-json=false -log-debug=$(DEBUG) -port=$(LEASE_SERVICE_PORT)

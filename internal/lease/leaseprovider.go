@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"k8s.io/utils/pointer"
 )
 
@@ -87,6 +89,7 @@ func (lp *leaseProviderImpl) evictTTL(ctx context.Context) {
 			continue
 		}
 		if time.Since(*v.lastSeenAt) > lp.opts.TTL {
+			log.Ctx(ctx).Debug().EmbedObject(v).Msg("Request evicted (TTL)")
 			delete(lp.known, k)
 		}
 	}
@@ -102,13 +105,15 @@ func (lp *leaseProviderImpl) cleanup(ctx context.Context) {
 		return
 	}
 	if len(lp.known) == 1 {
-		delete(lp.known, lp.aquired.HeadSHA)
+		log.Ctx(ctx).Debug().EmbedObject(lp.acquired).Msg("Cleanup completed request")
 		delete(lp.known, lp.acquired.HeadSHA)
 		lp.acquired = nil
 	}
 }
 
 func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) (*Request, error) {
+	log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Inserting new lease request")
+
 	var updated bool = false
 
 	// Cleanup a potential leftover lease
@@ -119,7 +124,7 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 
 	// If we don't have a lease request for this commit, add it
 	if existing, ok := lp.known[leaseRequest.HeadSHA]; !ok {
-
+		log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Lease request is new")
 		if lp.acquired != nil {
 			return nil, errors.New("lease already acquired")
 		}
@@ -132,8 +137,10 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 		lp.known[leaseRequest.HeadSHA].Status = pointer.String(StatusPending)
 
 	} else {
+		log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Lease request is already existing")
 		// Priority changed, update it
 		if existing.Priority != leaseRequest.Priority {
+			log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msgf("Lease request priority has changed (previous: %d, new: %d)", existing.Priority, leaseRequest.Priority)
 			existing.Priority = leaseRequest.Priority
 			updated = true
 		}
@@ -145,6 +152,7 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 		allowedTransition := existingStatus == StatusAcquired && (leaseRequestStatus == StatusSuccess || leaseRequestStatus == StatusFailure)
 		// condition
 		if statusMismatch && allowedTransition {
+			log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msgf("Lease request status has changed (previous: %s, new: %s)", existingStatus, leaseRequestStatus)
 			existing.Status = &leaseRequestStatus
 			updated = true
 		} else if statusMismatch {
@@ -152,11 +160,13 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 			return nil, fmt.Errorf("status missmatch for commit %s; expected: `success|failure`, got: `%s`", leaseRequest.HeadSHA, leaseRequestStatus)
 		}
 
+		log.Ctx(ctx).Debug().EmbedObject(existing).Msg("Lease request updated")
 		return existing, nil
 	}
 
 	if updated {
 		lp.lastUpdatedAt = time.Now()
+		log.Ctx(ctx).Debug().Msgf("Provider last updated time bumped (new time: %s, StabilizeDuration now ends at %s)", lp.lastUpdatedAt.Format(time.RFC3339), lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration).Format(time.RFC3339))
 	}
 
 	lp.evictTTL(ctx)
@@ -166,19 +176,24 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) *Request {
 	// Prereq: we can expect the arg to be already part of the map!
 
-	if lp.aquired != nil && !(pointer.StringDeref(lp.aquired.Status, STATUS_ACQUIRED) == STATUS_FAILURE) {
+	log.Ctx(ctx).Debug().EmbedObject(req).Msg("Evaluating lease request")
 
 	if lp.acquired != nil && !(pointer.StringDeref(lp.acquired.Status, StatusAcquired) == StatusFailure) {
 		// Lock already acquired
+		log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Lock already acquired (by sha %s, priority %d)", lp.acquired.HeadSHA, lp.acquired.Priority)
 		return req
 	}
 	// 1st: we reached the time limit -> lastUpdatedAt + StabilizeDuration > now
 	passedStabilizeDuration := time.Since(lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
+	log.Ctx(ctx).Debug().Msg("Now: " + time.Now().Format(time.RFC3339))
+	log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Stabilize duration check: Duration config: %.0fs, Last updated at: %s, Stabilize duration end: %s, Stabilize duration passed: %t", lp.opts.StabilizeDuration.Seconds(), lp.lastUpdatedAt.Format(time.RFC3339), lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration).Format(time.RFC3339), passedStabilizeDuration)
 	// 2nd: we received all requests and can take a decision
 	// 3rd: there has been no previous failure
 	reachedExpectedRequestCount := len(lp.known) >= lp.opts.ExpectedRequestCount
-	if lp.aquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
+	log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Expected request count check: config: %d, actual: %d, expected request count reached: %t", lp.opts.ExpectedRequestCount, len(lp.known), reachedExpectedRequestCount)
+
 	if lp.acquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
+		log.Ctx(ctx).Debug().EmbedObject(req).Msg("Stabilize duration has not been met yet, or we're still waiting for more request to register")
 		return req
 	}
 
@@ -194,6 +209,8 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 	if req.Priority == maxPriority {
 		req.Status = pointer.String(StatusAcquired)
 		lp.acquired = req
+		log.Ctx(ctx).Debug().EmbedObject(req).Msg("Current lease request has the higher priority. It then acquires the lock")
+		log.Ctx(ctx).Info().EmbedObject(req).Msg("Lock acquired")
 	}
 
 	return req
@@ -209,11 +226,13 @@ func (lp *leaseProviderImpl) Acquire(ctx context.Context, leaseRequest *Request)
 	if err != nil {
 		return nil, err
 	}
+	log.Ctx(ctx).Debug().EmbedObject(req).Msg("Lease request has been inserted")
 
 	// Check if the lease was released successful, let the client know it can die.
 	if lp.acquired != nil && pointer.StringDeref(lp.acquired.Status, StatusPending) == StatusCompleted {
 		req.Status = pointer.String(StatusCompleted)
 		delete(lp.known, req.HeadSHA)
+		log.Ctx(ctx).Info().EmbedObject(req).Msg("Lock holder succeeded. Current lease request completed")
 		return req, nil
 	}
 

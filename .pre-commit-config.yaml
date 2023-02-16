@@ -1,0 +1,19 @@
+repos:
+  - repo: git@github.com:ankorstore/pre-commit.git
+    rev: 6fec5a5b8ea7840ec5e0db16e2190c4021be0b64
+    hooks:
+      - id: required
+
+  - repo: local
+    hooks:
+      - id: go-test
+        name: go test
+        language: system
+        entry: make test
+        pass_filenames: false
+      - id: golangci-lint
+        name: golangci-lint
+        entry: make lint
+        types: [go]
+        language: golang
+        pass_filenames: false

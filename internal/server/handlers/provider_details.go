@@ -11,6 +11,6 @@ func ProviderDetails(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx)
 		if provider == nil {
 			return fiberErr
 		}
-		return c.Status(fiber.StatusOK).JSON(provider.GetKnown())
+		return c.Status(fiber.StatusOK).JSON(provider)
 	}
 }

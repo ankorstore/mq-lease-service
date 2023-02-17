@@ -2,6 +2,7 @@ package lease
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -52,9 +53,8 @@ func (lr *Request) UpdateLastSeenAt() {
 }
 
 type Provider interface {
-	Acquire(ctx context.Context, LeaseRequest *Request) (*Request, error)
-	Release(ctx context.Context, LeaseRequest *Request) (*Request, error)
-	GetKnown() map[string]*Request
+	Acquire(ctx context.Context, leaseRequest *Request) (*Request, error)
+	Release(ctx context.Context, leaseRequest *Request) (*Request, error)
 }
 
 // FIXME this should survive with crashes -> migrate to badger
@@ -76,8 +76,16 @@ func NewLeaseProvider(opts ProviderOpts) Provider {
 	}
 }
 
-func (lp *leaseProviderImpl) GetKnown() map[string]*Request {
-	return lp.known
+func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		LastUpdatedAt *time.Time          `json:"last_updated_at"`
+		Acquired      *Request            `json:"acquired"`
+		Known         map[string]*Request `json:"known"`
+	}{
+		LastUpdatedAt: lp.lastUpdatedAt,
+		Acquired:      lp.acquired,
+		Known:         lp.known,
+	})
 }
 
 // evictTTL performs housekeeping based on TTLs and when events have last been received

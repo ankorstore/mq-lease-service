@@ -161,7 +161,6 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 		}
 
 		log.Ctx(ctx).Debug().EmbedObject(existing).Msg("Lease request updated")
-		updated = true
 	}
 
 	if updated {

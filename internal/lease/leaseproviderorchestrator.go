@@ -8,16 +8,12 @@ import (
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/config/server/latest"
 )
 
-const (
-	defaultTTL = time.Second * 30
-)
-
 func NewProviderOrchestrator(repositories []*latest.GithubRepositoryConfig) ProviderOrchestrator {
 	leaseProviders := make(map[string]Provider)
 	for _, repository := range repositories {
 		leaseProviders[getKey(repository.Owner, repository.Name, repository.BaseRef)] = NewLeaseProvider(ProviderOpts{
 			StabilizeDuration:    time.Second * time.Duration(repository.StabilizeDuration),
-			TTL:                  defaultTTL,
+			TTL:                  time.Second * time.Duration(repository.TTL),
 			ExpectedRequestCount: repository.ExpectedRequestCount,
 		})
 	}

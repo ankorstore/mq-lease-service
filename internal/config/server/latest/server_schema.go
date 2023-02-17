@@ -11,5 +11,6 @@ type GithubRepositoryConfig struct {
 	Name                 string `yaml:"name"`
 	BaseRef              string `yaml:"base_ref"`
 	StabilizeDuration    int    `yaml:"stabilize_duration"`
+	TTL                  int    `yaml:"ttl"`
 	ExpectedRequestCount int    `yaml:"expected_request_count"`
 }

@@ -28,7 +28,7 @@ func getLeaseProviderOrFail(c *fiber.Ctx, orchestrator lease.ProviderOrchestrato
 	provider, err := orchestrator.Get(owner, repo, baseRef)
 	if err != nil {
 		log.Ctx(c.UserContext()).Error().Err(err).Msg("Error when retrieving provider")
-		return nil, apiError(c, fiber.StatusBadRequest, err.Error(), nil)
+		return nil, apiError(c, fiber.StatusNotFound, err.Error(), nil)
 	}
 
 	return provider, nil

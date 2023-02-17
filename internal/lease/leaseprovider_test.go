@@ -31,6 +31,7 @@ func TestLeaseRequest_UpdateLastSeenAt_Update(t *testing.T) {
 }
 
 func TestNewLeaseProvider(t *testing.T) {
+	creationTime := time.Now()
 	opts := ProviderOpts{
 		StabilizeDuration:    time.Minute,
 		TTL:                  time.Second,
@@ -43,7 +44,7 @@ func TestNewLeaseProvider(t *testing.T) {
 	assert.Equal(t, opts, leaseProviderImpl.opts)
 	assert.NotNil(t, leaseProviderImpl.known)
 	assert.Nil(t, leaseProviderImpl.acquired)
-	assert.Nil(t, leaseProviderImpl.lastUpdatedAt)
+	assert.True(t, leaseProviderImpl.lastUpdatedAt.After(creationTime))
 }
 
 func Test_leaseProviderImpl_insert_update_ok(t *testing.T) {
@@ -242,8 +243,7 @@ func Test_leaseProviderImpl_evaluateRequest_timePassed(t *testing.T) {
 	assert.Equal(t, *req2.Status, StatusPending)
 
 	// Simulate a time passed by setting the last updated timestamp in the past
-	updatedAt := time.Now().Add(-2 * time.Minute)
-	lpImpl.lastUpdatedAt = &updatedAt
+	lpImpl.lastUpdatedAt = time.Now().Add(-2 * time.Minute)
 	_ = lpImpl.evaluateRequest(context.Background(), req2)
 	assert.Equal(t, *req2.Status, StatusAcquired)
 }
@@ -438,8 +438,7 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNoNewRequest(t *testing.T) {
 
 	// req2 has the highest priority -> it gets the lease (assuming sufficient time passed)
 	// (note: backdate the stabilisation duration)
-	updatedAt := time.Now().Add(-100 * time.Minute)
-	lpImpl.lastUpdatedAt = &updatedAt
+	lpImpl.lastUpdatedAt = time.Now().Add(-100 * time.Minute)
 	req2, err = lp.Acquire(context.Background(), req2)
 	assert.NoError(t, err)
 	assert.Equal(t, StatusAcquired, *req2.Status)

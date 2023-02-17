@@ -14,15 +14,15 @@ const (
   - owner: test
     name: repo0
     base_ref: main
-    stabilize_duration: 300
+    stabilize_duration_seconds: 300
     expected_request_count: 4
-    ttl: 20
+    ttl_seconds: 20
   - owner: test
     name: repo1
     base_ref: develop
-    stabilize_duration: 100
+    stabilize_duration_seconds: 100
     expected_request_count: 5
-    ttl: 30`
+    ttl_seconds: 30`
 )
 
 func TestLoadServerConfig(t *testing.T) {

@@ -62,7 +62,7 @@ type leaseProviderImpl struct {
 	mutex sync.Mutex
 	opts  ProviderOpts
 
-	lastUpdatedAt *time.Time
+	lastUpdatedAt time.Time
 
 	acquired *Request
 	known    map[string]*Request
@@ -71,14 +71,14 @@ type leaseProviderImpl struct {
 func NewLeaseProvider(opts ProviderOpts) Provider {
 	return &leaseProviderImpl{
 		opts:          opts,
-		lastUpdatedAt: nil,
+		lastUpdatedAt: time.Now(),
 		known:         make(map[string]*Request),
 	}
 }
 
 func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		LastUpdatedAt *time.Time          `json:"last_updated_at"`
+		LastUpdatedAt time.Time           `json:"last_updated_at"`
 		Acquired      *Request            `json:"acquired"`
 		Known         map[string]*Request `json:"known"`
 	}{
@@ -148,7 +148,12 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 		log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Lease request is already existing")
 		// Priority changed, update it
 		if existing.Priority != leaseRequest.Priority {
-			log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msgf("Lease request priority has changed (previous: %d, new: %d)", existing.Priority, leaseRequest.Priority)
+			log.Ctx(ctx).
+				Debug().
+				EmbedObject(leaseRequest).
+				Int("previous_priority", existing.Priority).
+				Int("new_priority", leaseRequest.Priority).
+				Msg("Lease request priority has changed")
 			existing.Priority = leaseRequest.Priority
 			updated = true
 		}
@@ -160,7 +165,12 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 		allowedTransition := existingStatus == StatusAcquired && (leaseRequestStatus == StatusSuccess || leaseRequestStatus == StatusFailure)
 		// condition
 		if statusMismatch && allowedTransition {
-			log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msgf("Lease request status has changed (previous: %s, new: %s)", existingStatus, leaseRequestStatus)
+			log.Ctx(ctx).
+				Debug().
+				EmbedObject(leaseRequest).
+				Str("previous_status", existingStatus).
+				Str("new_status", leaseRequestStatus).
+				Msg("Lease request status has changed")
 			existing.Status = &leaseRequestStatus
 			updated = true
 		} else if statusMismatch {
@@ -172,9 +182,12 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 	}
 
 	if updated {
-		now := time.Now()
-		lp.lastUpdatedAt = &now
-		log.Ctx(ctx).Debug().Msgf("Provider last updated time bumped (new time: %s, StabilizeDuration now ends at %s)", lp.lastUpdatedAt.Format(time.RFC3339), lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration).Format(time.RFC3339))
+		lp.lastUpdatedAt = time.Now()
+		log.Ctx(ctx).
+			Debug().
+			Time("new_last_updated_at", lp.lastUpdatedAt).
+			Time("new_stabilize_ends_at", lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration)).
+			Msg("Provider last updated time bumped")
 	}
 
 	lp.evictTTL(ctx)
@@ -188,20 +201,40 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 
 	if lp.acquired != nil && !(pointer.StringDeref(lp.acquired.Status, StatusAcquired) == StatusFailure) {
 		// Lock already acquired
-		log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Lock already acquired (by sha %s, priority %d)", lp.acquired.HeadSHA, lp.acquired.Priority)
+		log.Ctx(ctx).
+			Debug().
+			EmbedObject(req).
+			Msgf("Lock already acquired (by sha %s, priority %d)", lp.acquired.HeadSHA, lp.acquired.Priority)
 		return req
 	}
 	// 1st: we reached the time limit -> lastUpdatedAt + StabilizeDuration > now
-	passedStabilizeDuration := time.Since(*lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
-	log.Ctx(ctx).Debug().Msg("Now: " + time.Now().Format(time.RFC3339))
-	log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Stabilize duration check: Duration config: %.0fs, Last updated at: %s, Stabilize duration end: %s, Stabilize duration passed: %t", lp.opts.StabilizeDuration.Seconds(), lp.lastUpdatedAt.Format(time.RFC3339), lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration).Format(time.RFC3339), passedStabilizeDuration)
-	// 2nd: we received all requests and can take a decision
-	// 3rd: there has been no previous failure
-	reachedExpectedRequestCount := len(lp.known) >= lp.opts.ExpectedRequestCount
-	log.Ctx(ctx).Debug().EmbedObject(req).Msgf("Expected request count check: config: %d, actual: %d, expected request count reached: %t", lp.opts.ExpectedRequestCount, len(lp.known), reachedExpectedRequestCount)
+	passedStabilizeDuration := time.Since(lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
+	log.Ctx(ctx).
+		Debug().
+		EmbedObject(req).
+		Float64("config_stabilize_duration_sec", lp.opts.StabilizeDuration.Seconds()).
+		Time("last_updated_at", lp.lastUpdatedAt).
+		Time("stabilize_ends_at", lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration)).
+		Time("current_time", time.Now()).
+		Bool("stabilize_duration_passed", passedStabilizeDuration).
+		Msg("Stabilize duration check")
 
+	// 2nd: we received all requests and can take a decision
+	reachedExpectedRequestCount := len(lp.known) >= lp.opts.ExpectedRequestCount
+	log.Ctx(ctx).
+		Debug().
+		EmbedObject(req).
+		Int("config_expected_request_count", lp.opts.ExpectedRequestCount).
+		Int("actual_request_count", len(lp.known)).
+		Bool("expected_request_count_reached", reachedExpectedRequestCount).
+		Msg("Expected request count check")
+
+	// 3rd: there has been no previous failure
 	if lp.acquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
-		log.Ctx(ctx).Debug().EmbedObject(req).Msg("Stabilize duration has not been met yet, or we're still waiting for more request to register")
+		log.Ctx(ctx).
+			Debug().
+			EmbedObject(req).
+			Msg("Stabilize duration has not been met yet, or we're still waiting for more request to register")
 		return req
 	}
 
@@ -217,8 +250,14 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 	if req.Priority == maxPriority {
 		req.Status = pointer.String(StatusAcquired)
 		lp.acquired = req
-		log.Ctx(ctx).Debug().EmbedObject(req).Msg("Current lease request has the higher priority. It then acquires the lock")
-		log.Ctx(ctx).Info().EmbedObject(req).Msg("Lock acquired")
+		log.Ctx(ctx).
+			Debug().
+			EmbedObject(req).
+			Msg("Current lease request has the higher priority. It then acquires the lock")
+		log.Ctx(ctx).
+			Info().
+			EmbedObject(req).
+			Msg("Lock acquired")
 	}
 
 	return req

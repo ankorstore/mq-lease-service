@@ -62,6 +62,8 @@ type Storage[T object] interface {
 	// Save store the provided object in the storage
 	// the provided object should at least be able to return a non-null and unique Identifier (via the GetIdentifier() method)
 	Save(ctx context.Context, obj T) error
+	// HealthCheck verifies if the storage is connected and usable
+	HealthCheck(ctx context.Context, hydrationSample func() T) bool
 }
 
 type storageImpl[T object] struct {
@@ -149,6 +151,24 @@ func (s *storageImpl[T]) Save(ctx context.Context, obj T) error {
 	return txn.Commit()
 }
 
+// HealthCheck verifies if the storage is connected and usable
+func (s *storageImpl[T]) HealthCheck(ctx context.Context, hydrationSample func() T) bool {
+	if s.db == nil {
+		log.Ctx(ctx).Error().Msg("Storage healthcheck failed: db is nil")
+		return false
+	}
+	if s.db.IsClosed() {
+		log.Ctx(ctx).Error().Msg("Storage healthcheck failed: db is closed")
+		return false
+	}
+	if err := s.Hydrate(ctx, hydrationSample()); err != nil {
+		log.Ctx(ctx).Error().Err(err).Msg("Storage healthcheck failed: could not hydrate sample")
+		return false
+	}
+
+	return true
+}
+
 // NullStorage is a dummy object honoring the Storage interface, and can be used in unit tests
 // as a drop-in replacement in the dependencies if the test don't actually care about storage actions.
 type NullStorage[T object] struct{}
@@ -167,4 +187,8 @@ func (s NullStorage[T]) Hydrate(context.Context, T) error {
 
 func (s NullStorage[T]) Save(context.Context, T) error {
 	return nil
+}
+
+func (s NullStorage[T]) HealthCheck(context.Context, func() T) bool {
+	return true
 }

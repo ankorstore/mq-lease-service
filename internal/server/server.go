@@ -141,6 +141,8 @@ func (s *serverImpl) Init() error {
 		},
 	}))
 
+	// register k8s probes handlers
+	RegisterK8sProbesRoutes(s.app, s.storage)
 	// register API routes on the fiber app
 	RegisterRoutes(s.app, s.orchestrator)
 

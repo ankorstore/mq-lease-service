@@ -4,6 +4,8 @@ LEASE_SERVICE_PORT ?= 9000
 GOOS := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
+E2E_GINKGO_VERSION := v2.8.2
+
 default: clean lint test build
 
 .PHONY: help
@@ -13,12 +15,20 @@ help: ## Print this help with list of available commands/targets and their purpo
 lint:  ## run linters on the code base
 	golangci-lint run
 
+clear-state:  ## cleanup storage DB
+	rm -rf /tmp/state
+
 .PHONY: clean
 clean:  ## cleanup test cover output
 	rm -rf cover.out
 
 test:  ## run unit tests
-	go test -race -cover ./...
+	go test -race -cover $(shell go list ./... | grep -v /e2e)
+
+.PHONY: e2e
+e2e:  ## run e2e tests
+	cd e2e && \
+		go run github.com/onsi/ginkgo/v2/ginkgo@$(E2E_GINKGO_VERSION)
 
 .PHONY: build
 build:  ## build the application (server & cli)

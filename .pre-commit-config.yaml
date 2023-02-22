@@ -12,6 +12,12 @@ repos:
         entry: make test
         types: [go]
         pass_filenames: false
+      - id: go-e2e
+        name: go e2e
+        language: system
+        entry: make e2e
+        types: [ go ]
+        pass_filenames: false
       - id: golangci-lint
         name: golangci-lint
         entry: make lint

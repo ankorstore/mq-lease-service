@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -10,20 +9,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var (
-	debug bool
-	json  bool
-)
-
 type AppInfo interface {
 	GetAppName() string
 	GetCommit() string
 	GetTag() string
-}
-
-func InitFlags() {
-	flag.BoolVar(&debug, "log-debug", false, "Enable debug logging")
-	flag.BoolVar(&json, "log-json", true, "Enable console logging format")
 }
 
 // locationHook adds the log location
@@ -36,17 +25,23 @@ func (h locationHook) Run(e *zerolog.Event, l zerolog.Level, msg string) {
 	}
 }
 
-func New(info AppInfo) zerolog.Logger {
+type NewOpts struct {
+	AppInfo AppInfo
+	Debug   bool
+	JSON    bool
+}
+
+func New(opts NewOpts) zerolog.Logger {
 	var logOutput io.Writer
 	var logLevel zerolog.Level
 
 	logOutput = os.Stderr
-	if !json {
+	if !opts.JSON {
 		logOutput = zerolog.ConsoleWriter{Out: os.Stderr}
 	}
 
 	logLevel = zerolog.InfoLevel
-	if debug {
+	if opts.Debug {
 		logLevel = zerolog.DebugLevel
 	}
 
@@ -55,8 +50,8 @@ func New(info AppInfo) zerolog.Logger {
 					Level(logLevel).      // info level by default
 					Hook(locationHook{}). // Add caller information
 					With().
-					Timestamp().                     // Add timestamp to log
-					Str("app", info.GetAppName()).   // Pass app name to context
-					Str("build_tag", info.GetTag()). // Pass tag to context
+					Timestamp().                             // Add timestamp to log
+					Str("app", opts.AppInfo.GetAppName()).   // Pass app name to context
+					Str("build_tag", opts.AppInfo.GetTag()). // Pass tag to context
 					Logger()
 }

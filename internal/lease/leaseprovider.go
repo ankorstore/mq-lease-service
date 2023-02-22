@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/storage"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/pointer"
 )
 
@@ -17,6 +19,9 @@ type ProviderOpts struct {
 	StabilizeDuration    time.Duration
 	TTL                  time.Duration
 	ExpectedRequestCount int
+	ID                   string
+	Clock                clock.PassiveClock
+	Storage              storage.Storage[*ProviderState]
 }
 
 type Status string
@@ -36,6 +41,10 @@ type Request struct {
 	lastSeenAt *time.Time
 }
 
+func (lr *Request) UpdateLastSeenAt(t time.Time) {
+	lr.lastSeenAt = &t
+}
+
 // MarshalZerologObject allows the .Embed log context.
 func (lr *Request) MarshalZerologObject(e *zerolog.Event) {
 	status := ""
@@ -47,78 +56,206 @@ func (lr *Request) MarshalZerologObject(e *zerolog.Event) {
 		Str("lease_request_status", status)
 }
 
-func (lr *Request) UpdateLastSeenAt() {
-	now := time.Now()
-	lr.lastSeenAt = &now
+// ProviderState is the in-memory representation of the current merge queue.
+// This struct is persisted in the storage.
+type ProviderState struct {
+	id            string
+	lastUpdatedAt time.Time
+	acquired      *Request
+	known         map[string]*Request
+}
+
+type NewProviderStateOpts struct {
+	ID            string
+	LastUpdatedAt time.Time
+	Acquired      *Request
+	Known         map[string]*Request
+}
+
+func NewProviderState(opts NewProviderStateOpts) *ProviderState {
+	return &ProviderState{
+		id:            opts.ID,
+		lastUpdatedAt: opts.LastUpdatedAt,
+		acquired:      opts.Acquired,
+		known:         opts.Known,
+	}
+}
+
+func (ps *ProviderState) GetIdentifier() string {
+	return ps.id
+}
+
+type providerStateRequestStorePayload struct {
+	HeadSHA    string     `json:"head_sha"`
+	Priority   int        `json:"priority"`
+	Status     *string    `json:"status"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
+}
+type providerStateStorePayload struct {
+	ID            string                                       `json:"id"`
+	LastUpdatedAt time.Time                                    `json:"last_updated_at"`
+	AcquiredSHA   *string                                      `json:"acquired_sha"`
+	Known         map[string]*providerStateRequestStorePayload `json:"known"`
+}
+
+// Marshal used to marshal the state before being stored
+func (ps *ProviderState) Marshal() ([]byte, error) {
+	var acquiredSHA *string
+	if ps.acquired != nil {
+		acquiredSHA = &ps.acquired.HeadSHA
+	}
+	known := map[string]*providerStateRequestStorePayload{}
+	for k, v := range ps.known {
+		known[k] = &providerStateRequestStorePayload{
+			HeadSHA:    v.HeadSHA,
+			Priority:   v.Priority,
+			Status:     v.Status,
+			LastSeenAt: v.lastSeenAt,
+		}
+	}
+	res, err := json.Marshal(&providerStateStorePayload{
+		ID:            ps.id,
+		LastUpdatedAt: ps.lastUpdatedAt,
+		AcquiredSHA:   acquiredSHA,
+		Known:         known,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// Unmarshal used to unmarshal the state from the store to its native type
+func (ps *ProviderState) Unmarshal(b []byte) error {
+	p := &providerStateStorePayload{}
+	err := json.Unmarshal(b, p)
+	if err != nil {
+		return err
+	}
+	ps.id = p.ID
+	ps.lastUpdatedAt = p.LastUpdatedAt
+	known := map[string]*Request{}
+	for k, v := range p.Known {
+		known[k] = &Request{
+			HeadSHA:    v.HeadSHA,
+			Priority:   v.Priority,
+			Status:     v.Status,
+			lastSeenAt: v.LastSeenAt,
+		}
+	}
+	ps.known = known
+	if p.AcquiredSHA != nil {
+		ps.acquired = ps.known[*p.AcquiredSHA]
+	}
+	return nil
 }
 
 type Provider interface {
 	Acquire(ctx context.Context, leaseRequest *Request) (*Request, error)
 	Release(ctx context.Context, leaseRequest *Request) (*Request, error)
+	HydrateFromState(ctx context.Context) error
 }
 
-// FIXME this should survive with crashes -> migrate to badger
 type leaseProviderImpl struct {
-	mutex sync.Mutex
-	opts  ProviderOpts
+	mutex   sync.Mutex
+	opts    ProviderOpts
+	clock   clock.PassiveClock
+	storage storage.Storage[*ProviderState]
 
-	lastUpdatedAt time.Time
-
-	acquired *Request
-	known    map[string]*Request
+	state *ProviderState
 }
 
 func NewLeaseProvider(opts ProviderOpts) Provider {
+	cl := opts.Clock
+	// if no Clock service is provided, fallback to a Real clock
+	if cl == nil {
+		cl = clock.RealClock{}
+	}
+	st := opts.Storage
+	// if no Storage service is provided, fallback to a Null storage
+	if st == nil {
+		st = storage.NullStorage[*ProviderState]{}
+	}
+
 	return &leaseProviderImpl{
-		opts:          opts,
-		lastUpdatedAt: time.Now(),
-		known:         make(map[string]*Request),
+		opts:    opts,
+		clock:   cl,
+		storage: st,
+		state: &ProviderState{
+			id:            opts.ID,
+			lastUpdatedAt: cl.Now(),
+			known:         make(map[string]*Request),
+		},
 	}
 }
 
+func (lp *leaseProviderImpl) HydrateFromState(ctx context.Context) error {
+	return lp.storage.Hydrate(ctx, lp.state)
+}
+
+// MarshalJSON used to marshall the provider to its JSON form (used in API responses)
 func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		LastUpdatedAt time.Time           `json:"last_updated_at"`
 		Acquired      *Request            `json:"acquired"`
 		Known         map[string]*Request `json:"known"`
 	}{
-		LastUpdatedAt: lp.lastUpdatedAt,
-		Acquired:      lp.acquired,
-		Known:         lp.known,
+		LastUpdatedAt: lp.state.lastUpdatedAt,
+		Acquired:      lp.state.acquired,
+		Known:         lp.state.known,
 	})
+}
+
+func (lp *leaseProviderImpl) saveState(ctx context.Context) {
+	// Ignore upstream context, as this has to run no matter if the context is cancelled or not
+	err := lp.storage.Save(context.Background(), lp.state)
+	if err != nil {
+		log.Ctx(ctx).
+			Error().
+			Str("lease_provider_id", lp.state.id).
+			Err(err).
+			Msg("Failed to save provider")
+	}
+}
+
+// updateRequestLastSeenAt bump the last seen date on the request
+func (lp *leaseProviderImpl) updateRequestLastSeenAt(request *Request) {
+	now := lp.clock.Now()
+	request.UpdateLastSeenAt(now)
 }
 
 // evictTTL performs housekeeping based on TTLs and when events have last been received
 func (lp *leaseProviderImpl) evictTTL(ctx context.Context) {
-	for k, v := range lp.known {
+	for k, v := range lp.state.known {
 		// Do nothing when status is acquired / success.
 		status := pointer.StringDeref(v.Status, StatusPending)
 		if status == StatusAcquired || status == StatusSuccess {
 			continue
 		}
-		if time.Since(*v.lastSeenAt) > lp.opts.TTL {
+		if lp.clock.Since(*v.lastSeenAt) > lp.opts.TTL {
 			log.Ctx(ctx).Debug().EmbedObject(v).Msg("Request evicted (TTL)")
-			delete(lp.known, k)
+			delete(lp.state.known, k)
 		}
 	}
 }
 
-// evictSuccess cleanups a successful release event, so the next processing can start!
+// cleanup cleanups a successful release event, so the next processing can start!
 func (lp *leaseProviderImpl) cleanup(ctx context.Context) {
 	// When all commits reported their status, cleanup acquire lock for the next one.
-	if lp.acquired == nil {
+	if lp.state.acquired == nil {
 		return
 	}
-	if pointer.StringDeref(lp.acquired.Status, StatusAcquired) != StatusCompleted {
+	if pointer.StringDeref(lp.state.acquired.Status, StatusAcquired) != StatusCompleted {
 		return
 	}
-	if len(lp.known) == 1 {
-		log.Ctx(ctx).Debug().EmbedObject(lp.acquired).Msg("Cleanup completed request")
-		delete(lp.known, lp.acquired.HeadSHA)
-		lp.acquired = nil
+	if len(lp.state.known) == 1 {
+		log.Ctx(ctx).Debug().EmbedObject(lp.state.acquired).Msg("Cleanup completed request")
+		delete(lp.state.known, lp.state.acquired.HeadSHA)
+		lp.state.acquired = nil
 	}
 }
 
+// insert is trying to insert (or update) the request into the in-memory known requests list
 func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Inserting new lease request")
 
@@ -128,12 +265,12 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 	lp.cleanup(ctx)
 
 	// Update the last seen timestamp
-	leaseRequest.UpdateLastSeenAt()
+	lp.updateRequestLastSeenAt(leaseRequest)
 
 	// If we don't have a lease request for this commit, add it
-	if existing, ok := lp.known[leaseRequest.HeadSHA]; !ok {
+	if existing, ok := lp.state.known[leaseRequest.HeadSHA]; !ok {
 		log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Lease request is new")
-		if lp.acquired != nil {
+		if lp.state.acquired != nil {
 			return nil, errors.New("lease already acquired")
 		}
 
@@ -141,8 +278,8 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 			return nil, fmt.Errorf("invalid status %s for new LeaseRequest with HeadSHA %s", *leaseRequest.Status, leaseRequest.HeadSHA)
 		}
 
-		lp.known[leaseRequest.HeadSHA] = leaseRequest
-		lp.known[leaseRequest.HeadSHA].Status = pointer.String(StatusPending)
+		lp.state.known[leaseRequest.HeadSHA] = leaseRequest
+		lp.state.known[leaseRequest.HeadSHA].Status = pointer.String(StatusPending)
 		updated = true
 	} else {
 		log.Ctx(ctx).Debug().EmbedObject(leaseRequest).Msg("Lease request is already existing")
@@ -182,55 +319,56 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 	}
 
 	if updated {
-		lp.lastUpdatedAt = time.Now()
+		lp.state.lastUpdatedAt = lp.clock.Now()
 		log.Ctx(ctx).
 			Debug().
-			Time("new_last_updated_at", lp.lastUpdatedAt).
-			Time("new_stabilize_ends_at", lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration)).
+			Time("new_last_updated_at", lp.state.lastUpdatedAt).
+			Time("new_stabilize_ends_at", lp.state.lastUpdatedAt.Add(lp.opts.StabilizeDuration)).
 			Msg("Provider last updated time bumped")
 	}
 
 	lp.evictTTL(ctx)
-	return lp.known[leaseRequest.HeadSHA], nil
+	return lp.state.known[leaseRequest.HeadSHA], nil
 }
 
+// evaluateRequest evaluate the given request status
 func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) *Request {
 	// Prereq: we can expect the arg to be already part of the map!
 
 	log.Ctx(ctx).Debug().EmbedObject(req).Msg("Evaluating lease request")
 
-	if lp.acquired != nil && !(pointer.StringDeref(lp.acquired.Status, StatusAcquired) == StatusFailure) {
+	if lp.state.acquired != nil && !(pointer.StringDeref(lp.state.acquired.Status, StatusAcquired) == StatusFailure) {
 		// Lock already acquired
 		log.Ctx(ctx).
 			Debug().
 			EmbedObject(req).
-			Msgf("Lock already acquired (by sha %s, priority %d)", lp.acquired.HeadSHA, lp.acquired.Priority)
+			Msgf("Lock already acquired (by sha %s, priority %d)", lp.state.acquired.HeadSHA, lp.state.acquired.Priority)
 		return req
 	}
 	// 1st: we reached the time limit -> lastUpdatedAt + StabilizeDuration > now
-	passedStabilizeDuration := time.Since(lp.lastUpdatedAt) >= lp.opts.StabilizeDuration
+	passedStabilizeDuration := lp.clock.Since(lp.state.lastUpdatedAt) >= lp.opts.StabilizeDuration
 	log.Ctx(ctx).
 		Debug().
 		EmbedObject(req).
 		Float64("config_stabilize_duration_sec", lp.opts.StabilizeDuration.Seconds()).
-		Time("last_updated_at", lp.lastUpdatedAt).
-		Time("stabilize_ends_at", lp.lastUpdatedAt.Add(lp.opts.StabilizeDuration)).
-		Time("current_time", time.Now()).
+		Time("last_updated_at", lp.state.lastUpdatedAt).
+		Time("stabilize_ends_at", lp.state.lastUpdatedAt.Add(lp.opts.StabilizeDuration)).
+		Time("current_time", lp.clock.Now()).
 		Bool("stabilize_duration_passed", passedStabilizeDuration).
 		Msg("Stabilize duration check")
 
 	// 2nd: we received all requests and can take a decision
-	reachedExpectedRequestCount := len(lp.known) >= lp.opts.ExpectedRequestCount
+	reachedExpectedRequestCount := len(lp.state.known) >= lp.opts.ExpectedRequestCount
 	log.Ctx(ctx).
 		Debug().
 		EmbedObject(req).
 		Int("config_expected_request_count", lp.opts.ExpectedRequestCount).
-		Int("actual_request_count", len(lp.known)).
+		Int("actual_request_count", len(lp.state.known)).
 		Bool("expected_request_count_reached", reachedExpectedRequestCount).
 		Msg("Expected request count check")
 
 	// 3rd: there has been no previous failure
-	if lp.acquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
+	if lp.state.acquired == nil && (!passedStabilizeDuration && !reachedExpectedRequestCount) {
 		log.Ctx(ctx).
 			Debug().
 			EmbedObject(req).
@@ -240,7 +378,7 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 
 	maxPriority := 0
 	// get max priority
-	for _, known := range lp.known {
+	for _, known := range lp.state.known {
 		if known.Priority > maxPriority {
 			maxPriority = known.Priority
 		}
@@ -249,7 +387,7 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 	// Got the max priority, now check if we are the winner
 	if req.Priority == maxPriority {
 		req.Status = pointer.String(StatusAcquired)
-		lp.acquired = req
+		lp.state.acquired = req
 		log.Ctx(ctx).
 			Debug().
 			EmbedObject(req).
@@ -268,6 +406,9 @@ func (lp *leaseProviderImpl) Acquire(ctx context.Context, leaseRequest *Request)
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
 
+	// Save the state to storage
+	defer lp.saveState(ctx)
+
 	// Insert or get the correct one
 	req, err := lp.insert(ctx, leaseRequest)
 	if err != nil {
@@ -276,9 +417,9 @@ func (lp *leaseProviderImpl) Acquire(ctx context.Context, leaseRequest *Request)
 	log.Ctx(ctx).Debug().EmbedObject(req).Msg("Lease request has been inserted")
 
 	// Check if the lease was released successful, let the client know it can die.
-	if lp.acquired != nil && pointer.StringDeref(lp.acquired.Status, StatusPending) == StatusCompleted {
+	if lp.state.acquired != nil && pointer.StringDeref(lp.state.acquired.Status, StatusPending) == StatusCompleted {
 		req.Status = pointer.String(StatusCompleted)
-		delete(lp.known, req.HeadSHA)
+		delete(lp.state.known, req.HeadSHA)
 		log.Ctx(ctx).Info().EmbedObject(req).Msg("Lock holder succeeded. Current lease request completed")
 		return req, nil
 	}
@@ -291,13 +432,16 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
 
+	// Save the state to storage
+	defer lp.saveState(ctx)
+
 	// There are several occurrences when a lease cannot be released
 	// 1. No lease acquired
-	if lp.acquired == nil {
+	if lp.state.acquired == nil {
 		return nil, errors.New("no lease acquired")
 	}
 	// 2. Releasing from unknown HeadSHA that does not hold the lease
-	if lp.acquired.HeadSHA != leaseRequest.HeadSHA {
+	if lp.state.acquired.HeadSHA != leaseRequest.HeadSHA {
 		return nil, fmt.Errorf("commit %s does not hold the lease", leaseRequest.HeadSHA)
 	}
 
@@ -316,7 +460,7 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 
 	if status == StatusFailure {
 		// On failure, drop it. This way the next one can acquire the lease
-		delete(lp.known, req.HeadSHA)
+		delete(lp.state.known, req.HeadSHA)
 		return req, nil
 	}
 

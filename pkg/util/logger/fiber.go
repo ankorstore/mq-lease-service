@@ -12,7 +12,7 @@ const (
 	TraceparentHeaderName = "w3c-traceparent"
 )
 
-func FiberMiddleware(logger zerolog.Logger) fiber.Handler {
+func FiberMiddleware(logger *zerolog.Logger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		log := logger.With().Logger()
 

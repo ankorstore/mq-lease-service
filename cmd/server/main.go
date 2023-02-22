@@ -3,54 +3,75 @@ package main
 import (
 	"flag"
 	"os"
-	"strconv"
+	"os/signal"
+	"syscall"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/config"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/lease"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/server"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/version"
 	"github.com/ankorstore/gh-action-mq-lease-service/pkg/util/logger"
-	"github.com/gofiber/fiber/v2"
 )
 
 var (
-	serverPort uint
-	configPath string
+	serverPort         uint
+	configPath         string
+	logDebug           bool
+	logJSON            bool
+	persistentStateDir string
 )
 
 func init() {
+	// General flags
 	flag.UintVar(&serverPort, "port", 9000, "server listening port")
 	flag.StringVar(&configPath, "config", "./config.yaml", "Configuration path")
 
-	// Register logging flags
-	logger.InitFlags()
+	// Logging flags
+	flag.BoolVar(&logDebug, "log-debug", false, "Enable debug logging")
+	flag.BoolVar(&logJSON, "log-json", true, "Enable console logging format")
+
+	// Persistent state flags
+	flag.StringVar(&persistentStateDir, "persistents-state-dir", "/tmp/state", "Setup the directory for persistent state storage")
 }
 
 func main() {
 	flag.Parse()
 
 	// Logger
-	log := logger.New(version.Version{})
+	log := logger.New(logger.NewOpts{
+		AppInfo: version.Version{},
+		Debug:   logDebug,
+		JSON:    logJSON,
+	})
 
-	// Config
-	cfg, err := config.LoadServerConfig(configPath)
-	if err != nil {
-		log.Error().Msg("Failed loading configuration")
-		os.Exit(1)
+	// Main server
+	s := server.New(server.NewOpts{
+		Port:               int(serverPort),
+		Logger:             &log,
+		ConfigPath:         configPath,
+		PersistentStateDir: persistentStateDir,
+	})
+	if err := s.Init(); err != nil {
+		log.Panic().Err(err).Msg("Failed initializing the server")
 	}
 
-	// Lease provider orchestrator (handling all repos merge queue leases)
-	orchestrator := lease.NewProviderOrchestrator(cfg.Repositories)
+	// Signal handling (SIGTERM) to be able to gracefully shut down the server (both fiber + other resources,
+	// like the storage for ex).
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
-	// Fiber app
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
-	app.Use(logger.FiberMiddleware(log))
-	server.RegisterRoutes(app, orchestrator)
+	globShutdown := make(chan struct{}, 1)
 
-	log.Info().Msg("Bootstrap completed, starting...")
+	go func() {
+		<-c
+		log.Warn().Msg("SIGTERM received")
+		if err := s.Shutdown(); err != nil {
+			log.Error().Err(err).Msg("Could not shutdown server gracefully")
+		}
+		globShutdown <- struct{}{}
+	}()
 
-	if err := app.Listen(":" + strconv.Itoa(int(serverPort))); err != nil {
-		log.Err(err).Msg("Fiber server failed")
-		defer os.Exit(1)
+	if err := s.Start(); err != nil {
+		log.Panic().Err(err).Msg("Server error")
 	}
+
+	<-globShutdown
 }

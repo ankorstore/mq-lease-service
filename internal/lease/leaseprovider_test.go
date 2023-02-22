@@ -6,29 +6,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	clocktesting "k8s.io/utils/clock/testing"
 	"k8s.io/utils/pointer"
 )
-
-func TestLeaseRequest_UpdateLastSeenAt_Nil(t *testing.T) {
-	now := time.Now()
-
-	req := &Request{}
-	req.UpdateLastSeenAt()
-	assert.NotNil(t, req.lastSeenAt)
-	assert.True(t, now.Before(*req.lastSeenAt))
-}
-
-func TestLeaseRequest_UpdateLastSeenAt_Update(t *testing.T) {
-	now := time.Now()
-	req := &Request{
-		lastSeenAt: &now,
-	}
-	// Ensure there's a time shift
-	time.Sleep(10 * time.Millisecond)
-	req.UpdateLastSeenAt()
-	assert.NotNil(t, req.lastSeenAt)
-	assert.True(t, now.Before(*req.lastSeenAt))
-}
 
 func TestNewLeaseProvider(t *testing.T) {
 	creationTime := time.Now()
@@ -42,9 +22,151 @@ func TestNewLeaseProvider(t *testing.T) {
 	leaseProviderImpl, ok := leaseProvider.(*leaseProviderImpl)
 	assert.True(t, ok)
 	assert.Equal(t, opts, leaseProviderImpl.opts)
-	assert.NotNil(t, leaseProviderImpl.known)
-	assert.Nil(t, leaseProviderImpl.acquired)
-	assert.True(t, leaseProviderImpl.lastUpdatedAt.After(creationTime))
+	assert.NotNil(t, leaseProviderImpl.state.known)
+	assert.Nil(t, leaseProviderImpl.state.acquired)
+	assert.True(t, leaseProviderImpl.state.lastUpdatedAt.After(creationTime))
+}
+
+func Test_ProviderState_Marshall(t *testing.T) {
+	storedStateRaw := `{
+		"id": "some-key",
+		"last_updated_at": "2023-02-17T16:00:00+01:00",
+		"acquired_sha": "abcde",
+		"known": {
+			"fghij": {
+				"head_sha": "fghij",
+				"priority": 1,
+				"status": "pending",
+				"last_seen_at": "2023-02-17T16:00:10+01:00"
+			},
+			"abcde": {
+				"head_sha": "abcde",
+				"priority": 2,
+				"status": "acquired",
+				"last_seen_at": "2023-02-17T16:00:20+01:00"
+			}
+		}
+	}`
+
+	providerState := &ProviderState{
+		id:            "some-key",
+		lastUpdatedAt: time.Now(),
+		known:         make(map[string]*Request),
+	}
+
+	expectedLastUpdatedAt, _ := time.Parse(time.RFC3339, "2023-02-17T16:00:00+01:00")
+	expectedRequest1LastSeenAt, _ := time.Parse(time.RFC3339, "2023-02-17T16:00:10+01:00")
+	expectedRequest2LastSeenAt, _ := time.Parse(time.RFC3339, "2023-02-17T16:00:20+01:00")
+	expectedState := &ProviderState{
+		id:            "some-key",
+		lastUpdatedAt: expectedLastUpdatedAt,
+		known: map[string]*Request{
+			"fghij": {
+				HeadSHA:    "fghij",
+				Priority:   1,
+				Status:     pointer.String(StatusPending),
+				lastSeenAt: &expectedRequest1LastSeenAt,
+			},
+			"abcde": {
+				HeadSHA:    "abcde",
+				Priority:   2,
+				Status:     pointer.String(StatusAcquired),
+				lastSeenAt: &expectedRequest2LastSeenAt,
+			},
+		},
+	}
+	expectedState.acquired = expectedState.known["abcde"]
+
+	err := providerState.Unmarshal([]byte(storedStateRaw))
+	assert.NoError(t, err)
+	assert.Equal(t, expectedState, providerState)
+}
+
+func Test_ProviderState_Unmarshal(t *testing.T) {
+	lastUpdatedAt, _ := time.Parse(time.RFC3339, "2023-02-17T16:00:00+01:00")
+	request1LastSeenAt, _ := time.Parse(time.RFC3339, "2023-02-17T16:00:10+01:00")
+	request2LastSeenAt, _ := time.Parse(time.RFC3339, "2023-02-17T16:00:20+01:00")
+	providerState := &ProviderState{
+		id:            "some-key",
+		lastUpdatedAt: lastUpdatedAt,
+		known: map[string]*Request{
+			"fghij": {
+				HeadSHA:    "fghij",
+				Priority:   1,
+				Status:     pointer.String(StatusPending),
+				lastSeenAt: &request1LastSeenAt,
+			},
+			"abcde": {
+				HeadSHA:    "abcde",
+				Priority:   2,
+				Status:     pointer.String(StatusAcquired),
+				lastSeenAt: &request2LastSeenAt,
+			},
+		},
+	}
+	providerState.acquired = providerState.known["abcde"]
+
+	expectedStoredStateRaw := `{
+		"id": "some-key",
+		"last_updated_at": "2023-02-17T16:00:00+01:00",
+		"acquired_sha": "abcde",
+		"known": {
+			"fghij": {
+				"head_sha": "fghij",
+				"priority": 1,
+				"status": "pending",
+				"last_seen_at": "2023-02-17T16:00:10+01:00"
+			},
+			"abcde": {
+				"head_sha": "abcde",
+				"priority": 2,
+				"status": "acquired",
+				"last_seen_at": "2023-02-17T16:00:20+01:00"
+			}
+		}
+	}`
+
+	actualStoredStateBytes, err := providerState.Marshal()
+	assert.NoError(t, err)
+	assert.JSONEq(t, expectedStoredStateRaw, string(actualStoredStateBytes))
+}
+
+func Test_leaseProviderImpl_updateRequestLastSeenAt_Nil(t *testing.T) {
+	now := time.Now()
+	clk := clocktesting.NewFakePassiveClock(now)
+	lp := NewLeaseProvider(ProviderOpts{TTL: 10 * time.Second, Clock: clk})
+	lpImpl, ok := lp.(*leaseProviderImpl)
+	assert.True(t, ok)
+
+	req := &Request{
+		HeadSHA:  "sha1",
+		Priority: 10,
+	}
+
+	lpImpl.updateRequestLastSeenAt(req)
+	assert.NotNil(t, req.lastSeenAt)
+	assert.Equal(t, &now, req.lastSeenAt)
+}
+
+func TestLeaseRequest_UpdateLastSeenAt_Update(t *testing.T) {
+	now := time.Now()
+	clk := clocktesting.NewFakePassiveClock(now)
+	lp := NewLeaseProvider(ProviderOpts{TTL: 10 * time.Second, Clock: clk})
+	lpImpl, ok := lp.(*leaseProviderImpl)
+	assert.True(t, ok)
+
+	req := &Request{
+		lastSeenAt: &now,
+	}
+
+	future := now
+	future = future.Add(10 * time.Millisecond)
+	clk.SetTime(future)
+
+	lpImpl.updateRequestLastSeenAt(req)
+	assert.NotNil(t, req.lastSeenAt)
+	assert.Equal(t, &future, req.lastSeenAt)
+	assert.True(t, now.Before(*req.lastSeenAt))
 }
 
 func Test_leaseProviderImpl_insert_update_ok(t *testing.T) {
@@ -53,7 +175,7 @@ func Test_leaseProviderImpl_insert_update_ok(t *testing.T) {
 	assert.True(t, ok)
 
 	// Empty at startup
-	assert.Equal(t, 0, len(lpImpl.known))
+	assert.Equal(t, 0, len(lpImpl.state.known))
 
 	// Register first one
 	req1 := &Request{
@@ -62,8 +184,8 @@ func Test_leaseProviderImpl_insert_update_ok(t *testing.T) {
 	}
 	_, err := lpImpl.insert(context.Background(), req1)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(lpImpl.known))
-	assert.Equal(t, lpImpl.known[req1.HeadSHA], req1)
+	assert.Equal(t, 1, len(lpImpl.state.known))
+	assert.Equal(t, lpImpl.state.known[req1.HeadSHA], req1)
 
 	// Register 2nd
 	req2 := &Request{
@@ -71,8 +193,8 @@ func Test_leaseProviderImpl_insert_update_ok(t *testing.T) {
 	}
 	_, err = lpImpl.insert(context.Background(), req2)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(lpImpl.known))
-	assert.Equal(t, lpImpl.known[req2.HeadSHA], req2)
+	assert.Equal(t, 2, len(lpImpl.state.known))
+	assert.Equal(t, lpImpl.state.known[req2.HeadSHA], req2)
 
 	// OOverride 1st request
 	req1Update := &Request{
@@ -81,9 +203,9 @@ func Test_leaseProviderImpl_insert_update_ok(t *testing.T) {
 	}
 	_, err = lpImpl.insert(context.Background(), req1Update)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(lpImpl.known))
-	assert.Equal(t, lpImpl.known[req1Update.HeadSHA], req1)
-	assert.Equal(t, lpImpl.known[req1Update.HeadSHA].Priority, req1Update.Priority)
+	assert.Equal(t, 2, len(lpImpl.state.known))
+	assert.Equal(t, lpImpl.state.known[req1Update.HeadSHA], req1)
+	assert.Equal(t, lpImpl.state.known[req1Update.HeadSHA].Priority, req1Update.Priority)
 }
 
 func Test_leaseProviderImpl_insert_invalid_state_new(t *testing.T) {
@@ -117,7 +239,7 @@ func Test_leaseProviderImpl_insert_valid_state_transition(t *testing.T) {
 	for _, status := range []string{StatusFailure, StatusSuccess, StatusAcquired} {
 		// Manually set acquired state. It's a pointer -> it's auto updated in the state
 		req.Status = pointer.String(StatusAcquired)
-		lpImpl.acquired = req
+		lpImpl.state.acquired = req
 
 		updateReq := &Request{
 			HeadSHA:  "sha1",
@@ -175,7 +297,7 @@ func Test_leaseProviderImpl_evictTTL(t *testing.T) {
 	_, err := lpImpl.insert(context.Background(), req1)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 1, len(lpImpl.known))
+	assert.Equal(t, 1, len(lpImpl.state.known))
 	lpImpl.evictTTL(context.Background())
 
 	req2 := &Request{
@@ -184,12 +306,12 @@ func Test_leaseProviderImpl_evictTTL(t *testing.T) {
 	}
 	_, err = lpImpl.insert(context.Background(), req2)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(lpImpl.known))
+	assert.Equal(t, 2, len(lpImpl.state.known))
 
 	aheadOfTime := time.Now().Add(-100 * time.Second)
 	req1.lastSeenAt = &aheadOfTime
 	lpImpl.evictTTL(context.Background()) // <-- eviction should evict older entries now
-	assert.Equal(t, 1, len(lpImpl.known))
+	assert.Equal(t, 1, len(lpImpl.state.known))
 }
 
 func Test_leaseProviderImpl_evictTTL_acquired(t *testing.T) {
@@ -205,16 +327,16 @@ func Test_leaseProviderImpl_evictTTL_acquired(t *testing.T) {
 	// Insert one request
 	_, err := lpImpl.insert(context.Background(), req)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(lpImpl.known))
+	assert.Equal(t, 1, len(lpImpl.state.known))
 
 	aheadOfTime := time.Now().Add(-100 * time.Second)
 	req.lastSeenAt = &aheadOfTime
 	req.Status = pointer.String(StatusAcquired)
-	lpImpl.acquired = req
+	lpImpl.state.acquired = req
 
 	// Despite being outdated, this key should not be evicted!
 	lpImpl.evictTTL(context.Background())
-	assert.Equal(t, 1, len(lpImpl.known))
+	assert.Equal(t, 1, len(lpImpl.state.known))
 }
 
 func Test_leaseProviderImpl_evaluateRequest_timePassed(t *testing.T) {
@@ -243,7 +365,7 @@ func Test_leaseProviderImpl_evaluateRequest_timePassed(t *testing.T) {
 	assert.Equal(t, *req2.Status, StatusPending)
 
 	// Simulate a time passed by setting the last updated timestamp in the past
-	lpImpl.lastUpdatedAt = time.Now().Add(-2 * time.Minute)
+	lpImpl.state.lastUpdatedAt = time.Now().Add(-2 * time.Minute)
 	_ = lpImpl.evaluateRequest(context.Background(), req2)
 	assert.Equal(t, *req2.Status, StatusAcquired)
 }
@@ -306,7 +428,7 @@ func Test_leaseProviderImpl_evaluateRequest_errorNoLeaseAssigned(t *testing.T) {
 
 	// Set req2 to be the acquired lease
 	req2.Status = pointer.String(StatusAcquired)
-	lpImpl.acquired = req2
+	lpImpl.state.acquired = req2
 
 	// Make sure there's no status modification when checking if a lease is the winner
 	req1copy := lpImpl.evaluateRequest(context.Background(), &Request{
@@ -438,7 +560,7 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFailedNoNewRequest(t *testing.T) {
 
 	// req2 has the highest priority -> it gets the lease (assuming sufficient time passed)
 	// (note: backdate the stabilisation duration)
-	lpImpl.lastUpdatedAt = time.Now().Add(-100 * time.Minute)
+	lpImpl.state.lastUpdatedAt = time.Now().Add(-100 * time.Minute)
 	req2, err = lp.Acquire(context.Background(), req2)
 	assert.NoError(t, err)
 	assert.Equal(t, StatusAcquired, *req2.Status)

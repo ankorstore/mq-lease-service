@@ -7,10 +7,10 @@ import (
 )
 
 func RegisterRoutes(app *fiber.App, orchestrator lease.ProviderOrchestrator) {
-	app.Get("/", handlers.ProviderList(orchestrator))
+	app.Get("/", handlers.ProviderList(orchestrator)).Name("providers.list")
 
-	providerRoutes := app.Group("/:owner/:repo/:baseRef")
-	providerRoutes.Post("/acquire", handlers.Acquire(orchestrator))
-	providerRoutes.Post("/release", handlers.Release(orchestrator))
-	providerRoutes.Get("/", handlers.ProviderDetails(orchestrator))
+	providerRoutes := app.Group("/:owner/:repo/:baseRef").Name("provider.")
+	providerRoutes.Post("/acquire", handlers.Acquire(orchestrator)).Name("acquire")
+	providerRoutes.Post("/release", handlers.Release(orchestrator)).Name("release")
+	providerRoutes.Get("/", handlers.ProviderDetails(orchestrator)).Name("show")
 }

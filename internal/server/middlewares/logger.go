@@ -1,4 +1,4 @@
-package logger
+package middlewares
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ const (
 	TraceparentHeaderName = "w3c-traceparent"
 )
 
-func FiberMiddleware(logger *zerolog.Logger) fiber.Handler {
+func LoggerMiddleware(logger *zerolog.Logger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		log := logger.With().Logger()
 
@@ -38,8 +38,10 @@ func FiberMiddleware(logger *zerolog.Logger) fiber.Handler {
 			Str("req_method", c.Method()).
 			Str("req_ip", c.IP()).
 			Str("req_path", c.Path()).
+			Str("req_route_name", c.Route().Name).
 			Str("req_proto", c.Protocol()).
 			Str("req_user_agent", c.Get(fiber.HeaderUserAgent)).
+			Str("aks_route_name", c.Route().Name). // Company-wide logging requirements
 			Logger()
 
 		// Set loglevel based on status code

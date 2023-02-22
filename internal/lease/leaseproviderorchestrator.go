@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/config/server/latest"
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/metrics"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/storage"
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 )
 
@@ -15,9 +17,36 @@ type NewProviderOrchestratorOpts struct {
 	Repositories []*latest.GithubRepositoryConfig
 	Clock        clock.PassiveClock
 	Storage      storage.Storage[*ProviderState]
+	Metrics      metrics.Metrics
+}
+
+type providerMetrics struct {
+	queueSize       *prometheus.GaugeVec
+	mergedBatchSize *prometheus.HistogramVec
 }
 
 func NewProviderOrchestrator(opts NewProviderOrchestratorOpts) ProviderOrchestrator {
+	var pMetrics *providerMetrics
+	if opts.Metrics != nil {
+		pMetrics = &providerMetrics{
+			queueSize: opts.Metrics.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Name: "provider_lease_requests_total",
+					Help: "All lease requests known in a provider",
+				},
+				[]string{"provider_id"},
+			),
+			mergedBatchSize: opts.Metrics.NewHistogramVec(
+				prometheus.HistogramOpts{
+					Name:    "provider_merged_batch_size",
+					Help:    "Number of requests merged in same batch",
+					Buckets: []float64{1, 2, 3, 4, 5, 6, 7, 10, 15, 20},
+				},
+				[]string{"provider_id"},
+			),
+		}
+	}
+
 	leaseProviders := make(map[string]Provider)
 	for _, repository := range opts.Repositories {
 		key := getKey(repository.Owner, repository.Name, repository.BaseRef)
@@ -28,6 +57,7 @@ func NewProviderOrchestrator(opts NewProviderOrchestratorOpts) ProviderOrchestra
 			ID:                   key,
 			Clock:                opts.Clock,
 			Storage:              opts.Storage,
+			Metrics:              pMetrics,
 		})
 	}
 	return &leaseProviderOrchestratorImpl{

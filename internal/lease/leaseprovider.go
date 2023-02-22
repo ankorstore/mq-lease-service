@@ -22,6 +22,7 @@ type ProviderOpts struct {
 	ID                   string
 	Clock                clock.PassiveClock
 	Storage              storage.Storage[*ProviderState]
+	Metrics              *providerMetrics
 }
 
 type Status string
@@ -161,6 +162,7 @@ type leaseProviderImpl struct {
 	opts    ProviderOpts
 	clock   clock.PassiveClock
 	storage storage.Storage[*ProviderState]
+	metrics *providerMetrics
 
 	state *ProviderState
 }
@@ -181,6 +183,7 @@ func NewLeaseProvider(opts ProviderOpts) Provider {
 		opts:    opts,
 		clock:   cl,
 		storage: st,
+		metrics: opts.Metrics,
 		state: &ProviderState{
 			id:            opts.ID,
 			lastUpdatedAt: cl.Now(),
@@ -190,7 +193,11 @@ func NewLeaseProvider(opts ProviderOpts) Provider {
 }
 
 func (lp *leaseProviderImpl) HydrateFromState(ctx context.Context) error {
-	return lp.storage.Hydrate(ctx, lp.state)
+	if err := lp.storage.Hydrate(ctx, lp.state); err != nil {
+		return err
+	}
+	lp.updateMetrics()
+	return nil
 }
 
 // MarshalJSON used to marshall the provider to its JSON form (used in API responses)
@@ -401,10 +408,24 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 	return req
 }
 
+func (lp *leaseProviderImpl) updateMetrics() {
+	if lp.metrics != nil {
+		queueSize := 0
+		for _, r := range lp.state.known {
+			if pointer.StringDeref(r.Status, StatusCompleted) != StatusCompleted {
+				queueSize++
+			}
+		}
+
+		lp.metrics.queueSize.WithLabelValues(lp.opts.ID).Set(float64(queueSize))
+	}
+}
+
 func (lp *leaseProviderImpl) Acquire(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	// Ensure we don't have any collisions
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
+	defer lp.updateMetrics()
 
 	// Save the state to storage
 	defer lp.saveState(ctx)
@@ -431,6 +452,7 @@ func (lp *leaseProviderImpl) Acquire(ctx context.Context, leaseRequest *Request)
 func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request) (*Request, error) {
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
+	defer lp.updateMetrics()
 
 	// Save the state to storage
 	defer lp.saveState(ctx)
@@ -455,6 +477,18 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	if status == StatusSuccess {
 		// On success, set status to completed so all remaining ones can be removed
 		req.Status = pointer.String(StatusCompleted)
+
+		if lp.metrics != nil {
+			// compute merged batch size to report in the metrics
+			mergedBatchSize := 1
+			for _, known := range lp.state.known {
+				if known.Priority < req.Priority {
+					mergedBatchSize++
+				}
+			}
+			lp.metrics.mergedBatchSize.WithLabelValues(lp.opts.ID).Observe(float64(mergedBatchSize))
+		}
+
 		return req, nil
 	}
 

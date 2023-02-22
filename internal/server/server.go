@@ -11,10 +11,13 @@ import (
 
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/config"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/lease"
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/metrics"
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/server/middlewares"
 	"github.com/ankorstore/gh-action-mq-lease-service/internal/storage"
-	"github.com/ankorstore/gh-action-mq-lease-service/pkg/util/logger"
+	"github.com/ankorstore/gh-action-mq-lease-service/internal/version"
 	"github.com/gofiber/fiber/v2"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"k8s.io/utils/clock"
@@ -86,9 +89,11 @@ func (s *serverImpl) Init() error {
 	//  defer the closing of the storage if anything is panicking in the rest of the Init method
 	defer func() {
 		if r := recover(); r != nil {
+			log.Ctx(s.ctx).Warn().Msg("Panicking at server initialisation. Try to gracefully close the storage.")
 			if err := s.storage.Close(); err != nil {
 				log.Ctx(s.ctx).Error().Err(err).Msg("Failed to close storage")
 			}
+			panic(r)
 		}
 	}()
 
@@ -98,11 +103,21 @@ func (s *serverImpl) Init() error {
 		return fmt.Errorf("failed loading configuration: %w", err)
 	}
 
+	// Metrics
+	promRegistry := prometheus.NewRegistry()
+	metricsServ := metrics.New(metrics.NewOpts{
+		AppName:        version.Version{}.GetAppName(),
+		PromRegisterer: promRegistry,
+		PromGatherer:   promRegistry,
+	})
+	metricsServ.AddDefaultCollectors()
+
 	// Lease provider orchestrator (handling all repos merge queue leases)
 	s.orchestrator = lease.NewProviderOrchestrator(lease.NewProviderOrchestratorOpts{
 		Repositories: cfg.Repositories,
 		Clock:        s.clock,
 		Storage:      s.storage,
+		Metrics:      metricsServ,
 	})
 	// tries to hydrate the states of managed providers from the storage
 	if err := s.orchestrator.HydrateFromState(s.ctx); err != nil {
@@ -111,7 +126,12 @@ func (s *serverImpl) Init() error {
 
 	// Fiber app configuration
 	s.app = fiber.New(fiber.Config{DisableStartupMessage: true})
-	s.app.Use(logger.FiberMiddleware(s.logger))
+	s.app.Use(middlewares.PrometheusMiddleware(
+		s.app,
+		metricsServ,
+		"/metrics",
+	))
+	s.app.Use(middlewares.LoggerMiddleware(s.logger))
 	// recover middleware allow us to avoid a panic (happening in middlewares or http handlers) to stop the server
 	// this will result in a 500, but the server will continue to accept requests.
 	s.app.Use(fiberrecover.New(fiberrecover.Config{

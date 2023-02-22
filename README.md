@@ -77,7 +77,7 @@ sequenceDiagram
 
     GHA3->>+LeaseProvider: Acquire: priority: 3
     note right of LeaseProvider: No full state awareness (yet)
-    LeaseProvider-->>-GHA3: priority: 2, status: PENDING
+    LeaseProvider-->>-GHA3: priority: 3, status: PENDING
 
     par
     loop until acquired lease is released or acquired

@@ -74,6 +74,9 @@ type NewProviderStateOpts struct {
 }
 
 func NewProviderState(opts NewProviderStateOpts) *ProviderState {
+	if opts.Known == nil {
+		opts.Known = make(map[string]*Request)
+	}
 	return &ProviderState{
 		id:            opts.ID,
 		lastUpdatedAt: opts.LastUpdatedAt,
@@ -155,6 +158,7 @@ type Provider interface {
 	Acquire(ctx context.Context, leaseRequest *Request) (*Request, error)
 	Release(ctx context.Context, leaseRequest *Request) (*Request, error)
 	HydrateFromState(ctx context.Context) error
+	Clear(ctx context.Context)
 }
 
 type leaseProviderImpl struct {
@@ -184,11 +188,10 @@ func NewLeaseProvider(opts ProviderOpts) Provider {
 		clock:   cl,
 		storage: st,
 		metrics: opts.Metrics,
-		state: &ProviderState{
-			id:            opts.ID,
-			lastUpdatedAt: cl.Now(),
-			known:         make(map[string]*Request),
-		},
+		state: NewProviderState(NewProviderStateOpts{
+			ID:            opts.ID,
+			LastUpdatedAt: cl.Now(),
+		}),
 	}
 }
 
@@ -499,4 +502,17 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	}
 
 	return req, fmt.Errorf("unknown condition for commit %s", leaseRequest.HeadSHA)
+}
+
+func (lp *leaseProviderImpl) Clear(ctx context.Context) {
+	lp.mutex.Lock()
+	defer lp.mutex.Unlock()
+	defer lp.updateMetrics()
+
+	lp.state = NewProviderState(NewProviderStateOpts{
+		ID:            lp.state.id,
+		LastUpdatedAt: lp.clock.Now(),
+	})
+
+	lp.saveState(ctx)
 }

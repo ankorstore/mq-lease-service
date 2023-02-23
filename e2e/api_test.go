@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -182,6 +183,70 @@ var _ = Describe("API", Ordered, func() {
 					}`, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), string(acquiredLeaseRequestPayloadJSON), string(leaseRequestsPayloadsJSON))
 
 					Expect(providerDetailsRespBody).To(MatchJSON(expectedPayload))
+				})
+			})
+		})
+	})
+
+	Describe("Provider clear endpoint", func() {
+		BeforeEach(func() {
+			clk.SetTime(now)
+		})
+
+		Context("when the provider is unknown", func() {
+			It("should return a 404 response", func() {
+				resp, _ := apiCall(srv, providerClearReq("unknown", "unknown", "unknown"))
+				Expect(resp.StatusCode).To(Equal(http.StatusNotFound))
+			})
+		})
+
+		Context("when the provider is known", func() {
+			Context("when there is existing state", func() {
+				var clearResp *http.Response
+				var clearRespBody string
+				checkStateAndExpectEmptyPayload := func(resp *http.Response, respBody string) {
+					Expect(resp.StatusCode).To(Equal(http.StatusOK))
+					expectedPayload := fmt.Sprintf(`{
+						"last_updated_at": "%s",
+						"acquired": null,
+						"known": {}
+					}`, clk.Now().Format(time.RFC3339))
+					Expect(respBody).To(MatchJSON(expectedPayload))
+				}
+
+				JustBeforeEach(func() {
+					clearResp, clearRespBody = apiCall(srv, providerClearReq(owner, repo, baseRef))
+					// should always succeed
+					Expect(clearResp.StatusCode).To(Equal(http.StatusOK))
+				})
+
+				BeforeEach(func() {
+					providerState, opts := generateProviderState(now, owner, repo, baseRef, map[int]lease.Status{
+						1: lease.StatusPending,
+						2: lease.StatusAcquired,
+					}, pointer.Int(2))
+					storage.PrefillStorage(storageDir, providerState)
+					currentTime := opts.LastUpdatedAt
+					currentTime = currentTime.Add(time.Second)
+					clk.SetTime(currentTime)
+				})
+				It("should return an empty list of requests", func() {
+					checkStateAndExpectEmptyPayload(clearResp, clearRespBody)
+				})
+				It("should empty the local (in-memory) state", func() {
+					// try to get the new state again, should be empty
+					providerDetailsResp, providerDetailsRespBody := apiCall(srv, providerDetailsReq(owner, repo, baseRef))
+					checkStateAndExpectEmptyPayload(providerDetailsResp, providerDetailsRespBody)
+				})
+				It("should empty the persisted (storage) state", func() {
+					provider, err := srv.GetOrchestrator().Get(owner, repo, baseRef)
+					Expect(err).To(BeNil())
+					// fore hydration again
+					err = provider.HydrateFromState(context.Background())
+					Expect(err).To(BeNil())
+
+					providerDetailsResp, providerDetailsRespBody := apiCall(srv, providerDetailsReq(owner, repo, baseRef))
+					checkStateAndExpectEmptyPayload(providerDetailsResp, providerDetailsRespBody)
 				})
 			})
 		})
@@ -583,113 +648,113 @@ var _ = Describe("API", Ordered, func() {
 				})
 			})
 		})
-	})
 
-	Context("maximum request reached, Success build", func() {
-		BeforeEach(func() {
-			clk.SetTime(now)
-		})
+		Context("maximum request reached, Success build", func() {
+			BeforeEach(func() {
+				clk.SetTime(now)
+			})
 
-		It("should complete the flow successfully", func() {
-			max := configHelper.DefaultConfigRepoExpectedRequestCount
-			for i := 1; i <= max-1; i++ {
-				By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
-					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
-					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
+			It("should complete the flow successfully", func() {
+				max := configHelper.DefaultConfigRepoExpectedRequestCount
+				for i := 1; i <= max-1; i++ {
+					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
+						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
+						Expect(resp.StatusCode).To(Equal(http.StatusOK))
+						Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "pending"
 								}`, i, i)))
-				})
-			}
-			By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
-				resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max))
-				Expect(resp.StatusCode).To(Equal(http.StatusOK))
-				Expect(body).To(MatchJSON(fmt.Sprintf(`{
+					})
+				}
+				By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
+					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max))
+					Expect(resp.StatusCode).To(Equal(http.StatusOK))
+					Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "acquired"
 								}`, max, max)))
-			})
-			By(fmt.Sprintf("test release (success), request %d => should be completed", max), func() {
-				resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max, lease.StatusSuccess))
-				Expect(resp.StatusCode).To(Equal(http.StatusOK))
-				Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "completed"
-								}`, max, max)))
-			})
-			for i := 1; i <= max-1; i++ {
-				By(fmt.Sprintf("test acquire, request %d => should be completed", i), func() {
-					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
+				})
+				By(fmt.Sprintf("test release (success), request %d => should be completed", max), func() {
+					resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max, lease.StatusSuccess))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
 					Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "completed"
-								}`, i, i)))
+								}`, max, max)))
 				})
-			}
+				for i := 1; i <= max-1; i++ {
+					By(fmt.Sprintf("test acquire, request %d => should be completed", i), func() {
+						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
+						Expect(resp.StatusCode).To(Equal(http.StatusOK))
+						Expect(body).To(MatchJSON(fmt.Sprintf(`{
+									"head_sha": "xxx-%d",
+									"priority": %d,
+									"status": "completed"
+								}`, i, i)))
+					})
+				}
+			})
 		})
-	})
 
-	Context("maximum request reached, Failed build", func() {
-		BeforeEach(func() {
-			clk.SetTime(now)
-		})
+		Context("maximum request reached, Failed build", func() {
+			BeforeEach(func() {
+				clk.SetTime(now)
+			})
 
-		It("should complete the flow successfully", func() {
-			max := configHelper.DefaultConfigRepoExpectedRequestCount
-			for i := 1; i <= max-1; i++ {
-				By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
-					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
-					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
+			It("should complete the flow successfully", func() {
+				max := configHelper.DefaultConfigRepoExpectedRequestCount
+				for i := 1; i <= max-1; i++ {
+					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
+						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
+						Expect(resp.StatusCode).To(Equal(http.StatusOK))
+						Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "pending"
 								}`, i, i)))
-				})
-			}
-			By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
-				resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max))
-				Expect(resp.StatusCode).To(Equal(http.StatusOK))
-				Expect(body).To(MatchJSON(fmt.Sprintf(`{
+					})
+				}
+				By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
+					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max))
+					Expect(resp.StatusCode).To(Equal(http.StatusOK))
+					Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "acquired"
 								}`, max, max)))
-			})
-			By(fmt.Sprintf("test release (failure), request %d => should be failure", max), func() {
-				resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max, lease.StatusFailure))
-				Expect(resp.StatusCode).To(Equal(http.StatusOK))
-				Expect(body).To(MatchJSON(fmt.Sprintf(`{
+				})
+				By(fmt.Sprintf("test release (failure), request %d => should be failure", max), func() {
+					resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max, lease.StatusFailure))
+					Expect(resp.StatusCode).To(Equal(http.StatusOK))
+					Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "failure"
 								}`, max, max)))
-			})
-			for i := 1; i <= max-2; i++ {
-				By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
-					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
-					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
+				})
+				for i := 1; i <= max-2; i++ {
+					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
+						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
+						Expect(resp.StatusCode).To(Equal(http.StatusOK))
+						Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "pending"
 								}`, i, i)))
-				})
-			}
-			By(fmt.Sprintf("test acquire, request %d => should be acquired", max-1), func() {
-				resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max-1), max-1))
-				Expect(resp.StatusCode).To(Equal(http.StatusOK))
-				Expect(body).To(MatchJSON(fmt.Sprintf(`{
+					})
+				}
+				By(fmt.Sprintf("test acquire, request %d => should be acquired", max-1), func() {
+					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max-1), max-1))
+					Expect(resp.StatusCode).To(Equal(http.StatusOK))
+					Expect(body).To(MatchJSON(fmt.Sprintf(`{
 									"head_sha": "xxx-%d",
 									"priority": %d,
 									"status": "acquired"
 								}`, max-1, max-1)))
+				})
 			})
 		})
 	})
@@ -708,6 +773,15 @@ func providerListReq() *http.Request {
 func providerDetailsReq(owner string, repo string, baseRef string) *http.Request {
 	return httptest.NewRequest(
 		"GET",
+		fmt.Sprintf("/%s/%s/%s", owner, repo, baseRef),
+		nil,
+	)
+}
+
+// providerClearReq returns a pre-configured request for the "DELETE /:owner/:repo/:baseRef" endpoint
+func providerClearReq(owner string, repo string, baseRef string) *http.Request {
+	return httptest.NewRequest(
+		"DELETE",
 		fmt.Sprintf("/%s/%s/%s", owner, repo, baseRef),
 		nil,
 	)

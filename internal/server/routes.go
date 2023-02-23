@@ -14,6 +14,7 @@ func RegisterRoutes(app *fiber.App, orchestrator lease.ProviderOrchestrator) {
 	providerRoutes.Post("/acquire", handlers.Acquire(orchestrator)).Name("acquire")
 	providerRoutes.Post("/release", handlers.Release(orchestrator)).Name("release")
 	providerRoutes.Get("/", handlers.ProviderDetails(orchestrator)).Name("show")
+	providerRoutes.Delete("/", handlers.ProviderClear(orchestrator)).Name("clear")
 }
 
 func RegisterK8sProbesRoutes(app *fiber.App, storage storage.Storage[*lease.ProviderState]) {

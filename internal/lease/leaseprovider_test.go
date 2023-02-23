@@ -440,6 +440,57 @@ func Test_leaseProviderImpl_evaluateRequest_errorNoLeaseAssigned(t *testing.T) {
 	assert.Equal(t, req1copy, req1copy)
 }
 
+type clearTestFakeStorage struct{ state *ProviderState }
+
+func (s *clearTestFakeStorage) Init() error                                   { return nil }
+func (s *clearTestFakeStorage) Close() error                                  { return nil }
+func (s *clearTestFakeStorage) Hydrate(context.Context, *ProviderState) error { return nil }
+func (s *clearTestFakeStorage) Save(ctx context.Context, obj *ProviderState) error {
+	s.state = obj
+	return nil
+}
+func (s *clearTestFakeStorage) HealthCheck(context.Context, func() *ProviderState) bool { return true }
+
+func Test_leaseProviderImpl_Clear(t *testing.T) {
+	id := "provider-id"
+	now := time.Now()
+	clk := clocktesting.NewFakePassiveClock(now)
+	storage := &clearTestFakeStorage{}
+	lp := NewLeaseProvider(ProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: time.Minute, ExpectedRequestCount: 2, ID: id, Clock: clk, Storage: storage})
+	lpImpl, ok := lp.(*leaseProviderImpl)
+	assert.True(t, ok)
+
+	req1 := &Request{
+		HeadSHA:  "sha1",
+		Priority: 1,
+	}
+	req2 := &Request{
+		HeadSHA:  "sha2",
+		Priority: 2,
+	}
+
+	// Inject the two requests
+	req1, err := lp.Acquire(context.Background(), req1)
+	assert.NoError(t, err)
+	assert.Equal(t, StatusPending, *req1.Status)
+	req2, err = lp.Acquire(context.Background(), req2)
+	assert.NoError(t, err)
+	assert.Equal(t, StatusAcquired, *req2.Status)
+
+	// Try to clear
+	lp.Clear(context.Background())
+
+	expectedState := &ProviderState{
+		id:            id,
+		lastUpdatedAt: now,
+		acquired:      nil,
+		known:         make(map[string]*Request),
+	}
+	assert.NotNil(t, t, lpImpl.state)
+	assert.Equal(t, expectedState, lpImpl.state)
+	assert.Equal(t, expectedState, storage.state)
+}
+
 func Test_leaseProviderImpl__FullLoop_ReleaseSuccess(t *testing.T) {
 	lp := NewLeaseProvider(ProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: 1 * time.Minute, ExpectedRequestCount: 3})
 	req1 := &Request{

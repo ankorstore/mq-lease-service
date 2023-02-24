@@ -1,0 +1,12 @@
+.git
+.idea
+dist/
+.github/
+Dockerfile
+e2e/
+
+# Deployment-related
+kubernetes/
+hack/
+secrets/
+apps.yaml

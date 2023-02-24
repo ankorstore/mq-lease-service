@@ -307,6 +307,7 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 
 		// Update the state when it's a whitelisted transition (ACQUIRED -> SUCCESS/FAILURE)
 		existingStatus := pointer.StringDeref(existing.Status, StatusPending)
+		// Check if it's a whitelisted transition
 		leaseRequestStatus := pointer.StringDeref(leaseRequest.Status, StatusPending)
 		statusMismatch := existingStatus != leaseRequestStatus
 		allowedTransition := existingStatus == StatusAcquired && (leaseRequestStatus == StatusSuccess || leaseRequestStatus == StatusFailure)
@@ -325,6 +326,8 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 			return nil, fmt.Errorf("status missmatch for commit %s; expected: `success|failure`, got: `%s`", leaseRequest.HeadSHA, leaseRequestStatus)
 		}
 
+		// Update existing request no matter if it changed or not (it's used for TTL eviction)
+		lp.updateRequestLastSeenAt(existing)
 		log.Ctx(ctx).Debug().EmbedObject(existing).Msg("Lease request updated")
 	}
 

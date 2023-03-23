@@ -26,15 +26,9 @@ RUN go build \
     ./cmd/server/main.go
 
 ## Deploy
-FROM busybox:1.36.0-uclibc as busybox
-FROM gcr.io/distroless/base-debian10
-
+FROM scratch
 WORKDIR /
 COPY --from=build /server /server
-# we use busybox and copy sh binary here to be able to do envvar interpolation in the entrypoint command (for log-level)
-# so that it will be easy to override with a k8s envvar if we want to have debug logs without having to rebuild/deploy the app
-COPY --from=busybox /bin/sh /bin/sh
 
 EXPOSE 8080
-
-ENTRYPOINT /server -config=/config.yaml -log-json=true -log-debug=$LOG_DEBUG -port=8080
+ENTRYPOINT [ "/server" ]

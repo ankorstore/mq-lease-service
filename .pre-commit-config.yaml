@@ -24,3 +24,8 @@ repos:
         types: [go]
         language: golang
         pass_filenames: false
+      - id: gen-workflows
+        name: gen-workflows
+        entry: ./hack/gen_workflows.sh
+        language: script
+        pass_filenames: false

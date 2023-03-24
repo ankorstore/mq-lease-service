@@ -31,8 +31,17 @@ e2e:  ## run e2e tests
 		go run github.com/onsi/ginkgo/v2/ginkgo@$(E2E_GINKGO_VERSION)
 
 .PHONY: build
-build:  ## build the application (server & cli)
+build: build-server build-gha
+
+
+.PHONY: build-server
+build-server:  ## build the application (server)
 	goreleaser build --snapshot --clean --single-target
+
+.PHONY: build-gha
+build-gha:	## build the github action JS bundle(s)
+	npm ci
+	npm run build
 
 run-server: build  ## run the server with an example config
 	 ./dist/server_${GOOS}_${GOARCH}/server -config=hack/example-server-config.yaml -log-json=false -log-debug=$(DEBUG) -port=$(LEASE_SERVICE_PORT)

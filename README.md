@@ -185,5 +185,45 @@ sequenceDiagram
 
 
 ### GithubAction
-> :warning: WIP
-The GithubAction component of this repo interacts with the LeaseProvider and determines the priority of each run based on the commits ahead of the baseRef.
+The GithubAction component of this repo interacts with the LeaseProvider and determines the priority of each run based on the commits ahead of the base.
+It has two stages:
+1. Acquiring a lease
+2. Releasing a lease when (1) has been successful, reporting the Github action job status
+
+An example workflow can look like this:
+```yaml
+on:
+  # Trigger on PRs; here we just skip
+  pull_request:
+    branches: [ main ]
+  # Trigger on the merge group event
+  merge_group:
+    branches: [ main ]
+    types: [ checks_requested ]
+
+jobs:
+  access-shared-resource:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'merge_group' }}
+    steps:
+    - name: Checkout Plugin Repository
+      uses: actions/checkout@v3
+    - name: Aquire lease
+      id: acquire_lease
+      uses: ankorstore/gh-action-mq-lease-service@main
+      with:
+        # Endpoint to connect to
+        endpoint: https://your.lease.service.com
+        # **IMPORTANT** the job-status always has to be defined like this
+        job_status: ${{ job.status }}
+        # Optional: timeout_seconds (how long to wait before something is considered going wrong)
+        # timeout_seconds: 7200
+        # Optional: interval_seconds (the polling interval)
+        # timeout_seconds: 15
+    - name: sleep
+      # Only perform github actions when this run acquired the lease
+      if: ${{ steps.acquire_lease.outputs.result == 'acquired' }}
+      run: |
+        sleep 30
+    # Note: there is no further action required, the lease will be released in a post hook of the `Aquire lease` action.
+```

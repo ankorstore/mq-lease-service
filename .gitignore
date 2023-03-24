@@ -2,3 +2,4 @@ dist/
 
 kubernetes/vendor
 hack/workflows/vendor
+node_modules/

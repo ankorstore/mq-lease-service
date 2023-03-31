@@ -501,6 +501,10 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	if status == StatusFailure {
 		// On failure, drop it. This way the next one can acquire the lease
 		delete(lp.state.known, req.HeadSHA)
+		// when it is the last one, we can reset the state
+		if len(lp.state.known) == 0 {
+			lp.state.acquired = nil
+		}
 		return req, nil
 	}
 

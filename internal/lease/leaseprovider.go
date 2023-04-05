@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +17,13 @@ import (
 	"k8s.io/utils/clock"
 	"k8s.io/utils/pointer"
 )
+
+var refRegex *regexp.Regexp
+
+func init() {
+	// ex: gh-readonly-queue/develop/pr-31132-d107b89c095dd85ba6c62b8a4503100ee33a04bb
+	refRegex = regexp.MustCompile(`^gh-readonly-queue/([^/]+)/pr-(\d+)-([0-9a-fA-F]+)$`)
+}
 
 type ProviderOpts struct {
 	StabilizeDuration    time.Duration
@@ -37,9 +47,19 @@ const (
 
 type Request struct {
 	HeadSHA    string  `json:"head_sha"`
+	HeadRef    string  `json:"head_ref"`
 	Priority   int     `json:"priority"`
 	Status     *string `json:"status,omitempty"`
 	lastSeenAt *time.Time
+}
+
+type StackedPullRequest struct {
+	Number int `json:"number"`
+}
+
+type RequestContext struct {
+	Request             *Request              `json:"request"`
+	StackedPullRequests []*StackedPullRequest `json:"stacked_pull_requests"`
 }
 
 func (lr *Request) UpdateLastSeenAt(t time.Time) {
@@ -53,6 +73,7 @@ func (lr *Request) MarshalZerologObject(e *zerolog.Event) {
 		status = *lr.Status
 	}
 	e.Str("lease_request_head_sha", lr.HeadSHA).
+		Str("lease_request_head_ref", lr.HeadRef).
 		Int("lease_request_priority", lr.Priority).
 		Str("lease_request_status", status)
 }
@@ -91,6 +112,7 @@ func (ps *ProviderState) GetIdentifier() string {
 
 type providerStateRequestStorePayload struct {
 	HeadSHA    string     `json:"head_sha"`
+	HeadRef    string     `json:"head_ref"`
 	Priority   int        `json:"priority"`
 	Status     *string    `json:"status"`
 	LastSeenAt *time.Time `json:"last_seen_at"`
@@ -112,6 +134,7 @@ func (ps *ProviderState) Marshal() ([]byte, error) {
 	for k, v := range ps.known {
 		known[k] = &providerStateRequestStorePayload{
 			HeadSHA:    v.HeadSHA,
+			HeadRef:    v.HeadRef,
 			Priority:   v.Priority,
 			Status:     v.Status,
 			LastSeenAt: v.lastSeenAt,
@@ -142,6 +165,7 @@ func (ps *ProviderState) Unmarshal(b []byte) error {
 	for k, v := range p.Known {
 		known[k] = &Request{
 			HeadSHA:    v.HeadSHA,
+			HeadRef:    v.HeadRef,
 			Priority:   v.Priority,
 			Status:     v.Status,
 			lastSeenAt: v.LastSeenAt,
@@ -157,6 +181,7 @@ func (ps *ProviderState) Unmarshal(b []byte) error {
 type Provider interface {
 	Acquire(ctx context.Context, leaseRequest *Request) (*Request, error)
 	Release(ctx context.Context, leaseRequest *Request) (*Request, error)
+	BuildlRequestContext(ctx context.Context, leaseRequest *Request) (*RequestContext, error)
 	HydrateFromState(ctx context.Context) error
 	Clear(ctx context.Context)
 }
@@ -205,14 +230,35 @@ func (lp *leaseProviderImpl) HydrateFromState(ctx context.Context) error {
 
 // MarshalJSON used to marshall the provider to its JSON form (used in API responses)
 func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
+	requestContexts := make([]*RequestContext, 0, len(lp.state.known))
+	// build lease request context (= request data + stacked Pulls data)
+	for _, r := range lp.state.known {
+		reqContext, err := lp.BuildlRequestContext(context.Background(), r)
+		if err != nil {
+			return []byte{}, err
+		}
+		requestContexts = append(requestContexts, reqContext)
+	}
+
+	// sort the known requests (low priority = higher in the list)
+	sort.SliceStable(requestContexts, func(i, j int) bool {
+		return requestContexts[i].Request.Priority < requestContexts[j].Request.Priority
+	})
+
+	// build the request context for the acquired request
+	acquiredReqContext, err := lp.BuildlRequestContext(context.Background(), lp.state.acquired)
+	if err != nil {
+		return []byte{}, err
+	}
+
 	return json.Marshal(&struct {
-		LastUpdatedAt time.Time           `json:"last_updated_at"`
-		Acquired      *Request            `json:"acquired"`
-		Known         map[string]*Request `json:"known"`
+		LastUpdatedAt time.Time         `json:"last_updated_at"`
+		Acquired      *RequestContext   `json:"acquired"`
+		Known         []*RequestContext `json:"known"`
 	}{
 		LastUpdatedAt: lp.state.lastUpdatedAt,
-		Acquired:      lp.state.acquired,
-		Known:         lp.state.known,
+		Acquired:      acquiredReqContext,
+		Known:         requestContexts,
 	})
 }
 
@@ -302,6 +348,18 @@ func (lp *leaseProviderImpl) insert(ctx context.Context, leaseRequest *Request) 
 				Int("new_priority", leaseRequest.Priority).
 				Msg("Lease request priority has changed")
 			existing.Priority = leaseRequest.Priority
+			updated = true
+		}
+
+		// Head ref changed, update it
+		if existing.HeadRef != leaseRequest.HeadRef {
+			log.Ctx(ctx).
+				Debug().
+				EmbedObject(leaseRequest).
+				Str("previous_head_ref", existing.HeadRef).
+				Str("new_head_ref", leaseRequest.HeadRef).
+				Msg("Lease request head ref has changed")
+			existing.HeadRef = leaseRequest.HeadRef
 			updated = true
 		}
 
@@ -414,6 +472,39 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 	return req
 }
 
+func (lp *leaseProviderImpl) computeStackedPullRequests(leaseRequest *Request) ([]*StackedPullRequest, error) {
+	if nil == leaseRequest {
+		return make([]*StackedPullRequest, 0), nil
+	}
+
+	// consider only the other requests which have lower priority (+ current one)
+	filteredRequestKeys := make([]string, 0, len(lp.state.known))
+	for k, r := range lp.state.known {
+		if r.Priority > leaseRequest.Priority {
+			continue
+		}
+		filteredRequestKeys = append(filteredRequestKeys, k)
+	}
+	// sort the filtered requests by priority
+	sort.SliceStable(filteredRequestKeys, func(i, j int) bool {
+		return lp.state.known[filteredRequestKeys[i]].Priority < lp.state.known[filteredRequestKeys[j]].Priority
+	})
+
+	stackedPullRequests := make([]*StackedPullRequest, 0, len(filteredRequestKeys))
+	// compute the stacked pr list (by looping over the filtered/sorted requests)
+	for _, k := range filteredRequestKeys {
+		prNumber, err := getPRNumberFromRef(lp.state.known[k].HeadRef)
+		if err != nil {
+			return stackedPullRequests, err
+		}
+
+		stackedPullRequests = append(stackedPullRequests, &StackedPullRequest{
+			Number: prNumber,
+		})
+	}
+	return stackedPullRequests, nil
+}
+
 func (lp *leaseProviderImpl) updateMetrics() {
 	if lp.metrics != nil {
 		queueSize := 0
@@ -511,6 +602,30 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	return req, fmt.Errorf("unknown condition for commit %s", leaseRequest.HeadSHA)
 }
 
+func (lp *leaseProviderImpl) BuildlRequestContext(ctx context.Context, leaseRequest *Request) (*RequestContext, error) {
+	// a request context is a combination of a request object and its stacked pull requests info
+	if nil == leaseRequest {
+		return nil, nil
+	}
+
+	requestContext := &RequestContext{
+		Request: leaseRequest,
+	}
+
+	stackedPulls, err := lp.computeStackedPullRequests(leaseRequest)
+	if err != nil {
+		log.Ctx(ctx).
+			Error().
+			EmbedObject(leaseRequest).
+			Err(err).
+			Msg("Failed to build request context")
+
+		return requestContext, err
+	}
+	requestContext.StackedPullRequests = stackedPulls
+	return requestContext, nil
+}
+
 func (lp *leaseProviderImpl) Clear(ctx context.Context) {
 	lp.mutex.Lock()
 	defer lp.mutex.Unlock()
@@ -522,4 +637,23 @@ func (lp *leaseProviderImpl) Clear(ctx context.Context) {
 	})
 
 	lp.saveState(ctx)
+}
+
+// getPRNumberFromRef extract pull request number from a GH read-only branch ref name
+func getPRNumberFromRef(ref string) (int, error) {
+	matches := refRegex.FindStringSubmatch(ref)
+
+	if len(matches) == 0 {
+		return 0, fmt.Errorf("could not extract PR number from ref: invalid ref format (given: `%s`)", ref)
+	}
+
+	prNumber, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return 0, fmt.Errorf("could not extract PR number from ref: invalid PR integer (given: `%s`, ref: `%s`)", matches[2], ref)
+	}
+	return prNumber, nil
+}
+
+func ValidateGHTempRef(ref string) bool {
+	return refRegex.MatchString(ref)
 }

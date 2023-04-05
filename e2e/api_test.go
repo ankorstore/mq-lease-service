@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -88,7 +89,7 @@ var _ = Describe("API", Ordered, func() {
 					"%s:%s:%s": {
 						"last_updated_at": "%s",
 						"acquired": null,
-						"known": {}
+						"known": []
 					}
 				}`, owner, repo, baseRef, now.Format(time.RFC3339))
 
@@ -110,15 +111,20 @@ var _ = Describe("API", Ordered, func() {
 				storage.PrefillStorage(storageDir, providerState)
 			})
 			It("should return an non-empty list of requests", func() {
-				leaseRequestsPayloadsJSON, _ := json.Marshal(providerStateOpts.Known)
-				acquiredLeaseRequestPayloadJSON, _ := json.Marshal(providerStateOpts.Acquired)
+				leaseRequestsPayloadsJSON := buildExpectedRequestsContextPayloads(providerStateOpts.Known, map[string][]int{
+					"xxx-1": rangeInt(1),
+					"xxx-2": rangeInt(2),
+					"xxx-3": rangeInt(3),
+					"xxx-4": rangeInt(4),
+				})
+				acquiredLeaseRequestPayloadJSON := buildExpectedRequestContextPayload(providerStateOpts.Acquired, rangeInt(4))
 				expectedPayload := fmt.Sprintf(`{
 					"%s:%s:%s": {
 						"last_updated_at": "%s",
 						"acquired": %s,
 						"known": %s
 					}
-				}`, owner, repo, baseRef, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), string(acquiredLeaseRequestPayloadJSON), string(leaseRequestsPayloadsJSON))
+				}`, owner, repo, baseRef, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), acquiredLeaseRequestPayloadJSON, leaseRequestsPayloadsJSON)
 
 				Expect(providerListingRespBody).To(MatchJSON(expectedPayload))
 			})
@@ -153,7 +159,7 @@ var _ = Describe("API", Ordered, func() {
 					expectedPayload := fmt.Sprintf(`{
 						"last_updated_at": "%s",
 						"acquired": null,
-						"known": {}
+						"known": []
 					}`, now.Format(time.RFC3339))
 
 					Expect(providerDetailsRespBody).To(MatchJSON(expectedPayload))
@@ -174,13 +180,18 @@ var _ = Describe("API", Ordered, func() {
 					storage.PrefillStorage(storageDir, providerState)
 				})
 				It("should return an non-empty list of requests", func() {
-					leaseRequestsPayloadsJSON, _ := json.Marshal(providerStateOpts.Known)
-					acquiredLeaseRequestPayloadJSON, _ := json.Marshal(providerStateOpts.Acquired)
+					leaseRequestsPayloadsJSON := buildExpectedRequestsContextPayloads(providerStateOpts.Known, map[string][]int{
+						"xxx-1": rangeInt(1),
+						"xxx-2": rangeInt(2),
+						"xxx-3": rangeInt(3),
+						"xxx-4": rangeInt(4),
+					})
+					acquiredLeaseRequestPayloadJSON := buildExpectedRequestContextPayload(providerStateOpts.Acquired, rangeInt(4))
 					expectedPayload := fmt.Sprintf(`{
 						"last_updated_at": "%s",
 						"acquired": %s,
 						"known": %s
-					}`, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), string(acquiredLeaseRequestPayloadJSON), string(leaseRequestsPayloadsJSON))
+					}`, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), acquiredLeaseRequestPayloadJSON, leaseRequestsPayloadsJSON)
 
 					Expect(providerDetailsRespBody).To(MatchJSON(expectedPayload))
 				})
@@ -209,7 +220,7 @@ var _ = Describe("API", Ordered, func() {
 					expectedPayload := fmt.Sprintf(`{
 						"last_updated_at": "%s",
 						"acquired": null,
-						"known": {}
+						"known": []
 					}`, clk.Now().Format(time.RFC3339))
 					Expect(respBody).To(MatchJSON(expectedPayload))
 				}
@@ -266,6 +277,7 @@ var _ = Describe("API", Ordered, func() {
 
 		Context("when the provider is known", func() {
 			var headSha string
+			var headRef string
 			var priority int
 			var acquireResp *http.Response
 			var acquireRespBody string
@@ -287,15 +299,17 @@ var _ = Describe("API", Ordered, func() {
 						clk.SetTime(opts.LastUpdatedAt)
 
 						headSha = fmt.Sprintf("xxx-%d", toGenerate+1)
+						headRef = ref(toGenerate + 1)
 						priority = toGenerate + 1
 					})
 					It("the request status should be pending", func() {
 						Expect(acquireResp.StatusCode).To(Equal(http.StatusOK))
-						expectedPayload := fmt.Sprintf(`{
-									"head_sha": "%s",
-									"priority": %d,
-									"status": "pending"
-								}`, headSha, priority)
+						expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  headSha,
+							HeadRef:  headRef,
+							Priority: priority,
+							Status:   pointer.String(lease.StatusPending),
+						}, rangeInt(configHelper.DefaultConfigRepoExpectedRequestCount-1))
 						Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 					})
 				})
@@ -312,15 +326,17 @@ var _ = Describe("API", Ordered, func() {
 						clk.SetTime(opts.LastUpdatedAt)
 
 						headSha = fmt.Sprintf("xxx-%d", toGenerate+1)
+						headRef = ref(toGenerate + 1)
 						priority = toGenerate + 1
 					})
 					It("the request status should be acquired", func() {
 						Expect(acquireResp.StatusCode).To(Equal(http.StatusOK))
-						expectedPayload := fmt.Sprintf(`{
-										"head_sha": "%s",
-										"priority": %d,
-										"status": "acquired"
-									}`, headSha, priority)
+						expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  headSha,
+							HeadRef:  headRef,
+							Priority: priority,
+							Status:   pointer.String(lease.StatusAcquired),
+						}, rangeInt(configHelper.DefaultConfigRepoExpectedRequestCount))
 						Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 					})
 				})
@@ -336,15 +352,17 @@ var _ = Describe("API", Ordered, func() {
 						clk.SetTime(currentTime)
 
 						headSha = "xxx-1" //nolint:goconst
+						headRef = ref(1)
 						priority = 1
 					})
 					It("the request status should be acquired", func() {
 						Expect(acquireResp.StatusCode).To(Equal(http.StatusOK))
-						expectedPayload := fmt.Sprintf(`{
-									"head_sha": "%s",
-									"priority": %d,
-									"status": "acquired"
-								}`, headSha, priority)
+						expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  headSha,
+							HeadRef:  headRef,
+							Priority: priority,
+							Status:   pointer.String(lease.StatusAcquired),
+						}, rangeInt(1))
 						Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 					})
 				})
@@ -364,6 +382,7 @@ var _ = Describe("API", Ordered, func() {
 				Context("when the incoming lease request is new", func() {
 					BeforeEach(func() {
 						headSha = "xxx-3"
+						headRef = ref(3)
 						priority = 3
 					})
 					It("the request should be rejected", func() {
@@ -374,6 +393,7 @@ var _ = Describe("API", Ordered, func() {
 				Context("when the incoming lease request is already known", func() {
 					BeforeEach(func() {
 						headSha = "xxx-1"
+						headRef = ref(1)
 						priority = 1
 					})
 
@@ -390,11 +410,12 @@ var _ = Describe("API", Ordered, func() {
 						})
 						It("the request status should be completed", func() {
 							Expect(acquireResp.StatusCode).To(Equal(http.StatusOK))
-							expectedPayload := fmt.Sprintf(`{
-												"head_sha": "%s",
-												"priority": %d,
-												"status": "completed"
-											}`, headSha, priority)
+							expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+								HeadSHA:  headSha,
+								HeadRef:  headRef,
+								Priority: priority,
+								Status:   pointer.String(lease.StatusCompleted),
+							}, []int{})
 							Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -402,11 +423,12 @@ var _ = Describe("API", Ordered, func() {
 					Context("if the lease owner has not failed nor succeed yet", func() {
 						It("the request status should continue to be pending", func() {
 							Expect(acquireResp.StatusCode).To(Equal(http.StatusOK))
-							expectedPayload := fmt.Sprintf(`{
-													"head_sha": "%s",
-													"priority": %d,
-													"status": "pending"
-												}`, headSha, priority)
+							expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+								HeadSHA:  headSha,
+								HeadRef:  headRef,
+								Priority: priority,
+								Status:   pointer.String(lease.StatusPending),
+							}, rangeInt(1))
 							Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -429,6 +451,7 @@ var _ = Describe("API", Ordered, func() {
 
 		Context("when the provider is known", func() {
 			var headSha string
+			var headRef string
 			var priority int
 			var status string
 			var releaseResp *http.Response
@@ -441,6 +464,7 @@ var _ = Describe("API", Ordered, func() {
 			Context("when the lease has not already been acquired", func() {
 				BeforeEach(func() {
 					headSha = "xxx-1"
+					headRef = ref(1)
 					priority = 1
 					status = lease.StatusSuccess
 				})
@@ -464,6 +488,7 @@ var _ = Describe("API", Ordered, func() {
 				Context("when the current request is not the lease owner", func() {
 					BeforeEach(func() {
 						headSha = "xxx-1"
+						headRef = ref(1)
 						priority = 1
 						status = lease.StatusSuccess
 					})
@@ -475,6 +500,7 @@ var _ = Describe("API", Ordered, func() {
 				Context("when the current request is the lease owner", func() {
 					BeforeEach(func() {
 						headSha = "xxx-2"
+						headRef = ref(2)
 						priority = 2
 					})
 
@@ -484,11 +510,12 @@ var _ = Describe("API", Ordered, func() {
 						})
 						It("should transition the release request to completed", func() {
 							Expect(releaseResp.StatusCode).To(Equal(http.StatusOK))
-							expectedPayload := fmt.Sprintf(`{
-									"head_sha": "%s",
-									"priority": %d,
-									"status": "completed"
-								}`, headSha, priority)
+							expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+								HeadSHA:  headSha,
+								HeadRef:  headRef,
+								Priority: priority,
+								Status:   pointer.String(lease.StatusCompleted),
+							}, rangeInt(2))
 							Expect(releaseRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -499,11 +526,12 @@ var _ = Describe("API", Ordered, func() {
 						})
 						It("should not transition the release request to failed", func() {
 							Expect(releaseResp.StatusCode).To(Equal(http.StatusOK))
-							expectedPayload := fmt.Sprintf(`{
-									"head_sha": "%s",
-									"priority": %d,
-									"status": "failure"
-								}`, headSha, priority)
+							expectedPayload := buildExpectedRequestContextPayload(&lease.Request{
+								HeadSHA:  headSha,
+								HeadRef:  headRef,
+								Priority: priority,
+								Status:   pointer.String(lease.StatusFailure),
+							}, rangeInt(1))
 							Expect(releaseRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -522,20 +550,22 @@ var _ = Describe("API", Ordered, func() {
 				By("test acquire, request 1 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-1",
-									"priority": 1,
-									"status": "pending"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-1",
+						HeadRef:  ref(1),
+						Priority: 1,
+						Status:   pointer.String(lease.StatusPending),
+					}, rangeInt(1))))
 				})
 				By("test acquire, request 2 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-2",
-									"priority": 2,
-									"status": "pending"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-2",
+						HeadRef:  ref(2),
+						Priority: 2,
+						Status:   pointer.String(lease.StatusPending),
+					}, rangeInt(2))))
 				})
 				By("sleeping for stabilize duration", func() {
 					currentTime := now
@@ -545,38 +575,42 @@ var _ = Describe("API", Ordered, func() {
 				By("test acquire, request 1 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-1",
-									"priority": 1,
-									"status": "pending"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-1",
+						HeadRef:  ref(1),
+						Priority: 1,
+						Status:   pointer.String(lease.StatusPending),
+					}, rangeInt(1))))
 				})
-				By("test acquire, request 1 => should be acquired", func() {
+				By("test acquire, request 2 => should be acquired", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-2",
-									"priority": 2,
-									"status": "acquired"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-2",
+						HeadRef:  ref(2),
+						Priority: 2,
+						Status:   pointer.String(lease.StatusAcquired),
+					}, rangeInt(2))))
 				})
 				By("test release (success), request 2 => should be completed", func() {
 					resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-2", 2, lease.StatusSuccess))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-2",
-									"priority": 2,
-									"status": "completed"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-2",
+						HeadRef:  ref(2),
+						Priority: 2,
+						Status:   pointer.String(lease.StatusCompleted),
+					}, rangeInt(2))))
 				})
 				By("test acquire, request 1 => should be completed", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-1",
-									"priority": 1,
-									"status": "completed"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-1",
+						HeadRef:  ref(1),
+						Priority: 1,
+						Status:   pointer.String(lease.StatusCompleted),
+					}, []int{})))
 				})
 			})
 		})
@@ -590,20 +624,22 @@ var _ = Describe("API", Ordered, func() {
 				By("test acquire, request 1 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-1",
-									"priority": 1,
-									"status": "pending"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-1",
+						HeadRef:  ref(1),
+						Priority: 1,
+						Status:   pointer.String(lease.StatusPending),
+					}, rangeInt(1))))
 				})
 				By("test acquire, request 2 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-2",
-									"priority": 2,
-									"status": "pending"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-2",
+						HeadRef:  ref(2),
+						Priority: 2,
+						Status:   pointer.String(lease.StatusPending),
+					}, rangeInt(2))))
 				})
 				By("sleeping for stabilize duration", func() {
 					currentTime := now
@@ -613,38 +649,42 @@ var _ = Describe("API", Ordered, func() {
 				By("test acquire, request 1 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-1",
-									"priority": 1,
-									"status": "pending"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-1",
+						HeadRef:  ref(1),
+						Priority: 1,
+						Status:   pointer.String(lease.StatusPending),
+					}, rangeInt(1))))
 				})
 				By("test acquire, request 2 => should be acquired", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-2",
-									"priority": 2,
-									"status": "acquired"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-2",
+						HeadRef:  ref(2),
+						Priority: 2,
+						Status:   pointer.String(lease.StatusAcquired),
+					}, rangeInt(2))))
 				})
 				By("test release (failure), request 2 => should be failure", func() {
 					resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-2", 2, lease.StatusFailure))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-2",
-									"priority": 2,
-									"status": "failure"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-2",
+						HeadRef:  ref(2),
+						Priority: 2,
+						Status:   pointer.String(lease.StatusFailure),
+					}, rangeInt(1))))
 				})
 				By("test acquire, request 1 => should be acquired", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(`{
-									"head_sha": "xxx-1",
-									"priority": 1,
-									"status": "acquired"
-								}`))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  "xxx-1",
+						HeadRef:  ref(1),
+						Priority: 1,
+						Status:   pointer.String(lease.StatusAcquired),
+					}, rangeInt(1))))
 				})
 			})
 		})
@@ -660,40 +700,44 @@ var _ = Describe("API", Ordered, func() {
 					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
 						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
 						Expect(resp.StatusCode).To(Equal(http.StatusOK))
-						Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "pending"
-								}`, i, i)))
+						Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  fmt.Sprintf("xxx-%d", i),
+							HeadRef:  ref(i),
+							Priority: i,
+							Status:   pointer.String(lease.StatusPending),
+						}, rangeInt(i))))
 					})
 				}
 				By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "acquired"
-								}`, max, max)))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  fmt.Sprintf("xxx-%d", max),
+						HeadRef:  ref(max),
+						Priority: max,
+						Status:   pointer.String(lease.StatusAcquired),
+					}, rangeInt(max))))
 				})
 				By(fmt.Sprintf("test release (success), request %d => should be completed", max), func() {
 					resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max, lease.StatusSuccess))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "completed"
-								}`, max, max)))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  fmt.Sprintf("xxx-%d", max),
+						HeadRef:  ref(max),
+						Priority: max,
+						Status:   pointer.String(lease.StatusCompleted),
+					}, rangeInt(max))))
 				})
 				for i := 1; i <= max-1; i++ {
 					By(fmt.Sprintf("test acquire, request %d => should be completed", i), func() {
 						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
 						Expect(resp.StatusCode).To(Equal(http.StatusOK))
-						Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "completed"
-								}`, i, i)))
+						Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  fmt.Sprintf("xxx-%d", i),
+							HeadRef:  ref(i),
+							Priority: i,
+							Status:   pointer.String(lease.StatusCompleted),
+						}, []int{})))
 					})
 				}
 			})
@@ -710,50 +754,55 @@ var _ = Describe("API", Ordered, func() {
 					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
 						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
 						Expect(resp.StatusCode).To(Equal(http.StatusOK))
-						Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "pending"
-								}`, i, i)))
+						Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  fmt.Sprintf("xxx-%d", i),
+							HeadRef:  ref(i),
+							Priority: i,
+							Status:   pointer.String(lease.StatusPending),
+						}, rangeInt(i))))
 					})
 				}
 				By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "acquired"
-								}`, max, max)))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  fmt.Sprintf("xxx-%d", max),
+						HeadRef:  ref(max),
+						Priority: max,
+						Status:   pointer.String(lease.StatusAcquired),
+					}, rangeInt(max))))
 				})
 				By(fmt.Sprintf("test release (failure), request %d => should be failure", max), func() {
 					resp, body := apiCall(srv, releaseReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max), max, lease.StatusFailure))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "failure"
-								}`, max, max)))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  fmt.Sprintf("xxx-%d", max),
+						HeadRef:  ref(max),
+						Priority: max,
+						Status:   pointer.String(lease.StatusFailure),
+					}, rangeInt(max-1))))
 				})
 				for i := 1; i <= max-2; i++ {
 					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
 						resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(i), i))
 						Expect(resp.StatusCode).To(Equal(http.StatusOK))
-						Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "pending"
-								}`, i, i)))
+						Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+							HeadSHA:  fmt.Sprintf("xxx-%d", i),
+							HeadRef:  ref(i),
+							Priority: i,
+							Status:   pointer.String(lease.StatusPending),
+						}, rangeInt(i))))
 					})
 				}
 				By(fmt.Sprintf("test acquire, request %d => should be acquired", max-1), func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-"+strconv.Itoa(max-1), max-1))
 					Expect(resp.StatusCode).To(Equal(http.StatusOK))
-					Expect(body).To(MatchJSON(fmt.Sprintf(`{
-									"head_sha": "xxx-%d",
-									"priority": %d,
-									"status": "acquired"
-								}`, max-1, max-1)))
+					Expect(body).To(MatchJSON(buildExpectedRequestContextPayload(&lease.Request{
+						HeadSHA:  fmt.Sprintf("xxx-%d", max-1),
+						HeadRef:  ref(max - 1),
+						Priority: max - 1,
+						Status:   pointer.String(lease.StatusAcquired),
+					}, rangeInt(max-1))))
 				})
 			})
 		})
@@ -792,7 +841,7 @@ func acquireReq(owner string, repo string, baseRef string, headSha string, prior
 	req := httptest.NewRequest(
 		"POST",
 		fmt.Sprintf("/%s/%s/%s/acquire", owner, repo, baseRef),
-		strings.NewReader(fmt.Sprintf(`{"head_sha": "%s", "priority": %d}`, headSha, priority)),
+		strings.NewReader(fmt.Sprintf(`{"head_sha": "%s", "head_ref": "%s", "priority": %d}`, headSha, ref(priority), priority)),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	return req
@@ -803,7 +852,7 @@ func releaseReq(owner string, repo string, baseRef string, headSha string, prior
 	req := httptest.NewRequest(
 		"POST",
 		fmt.Sprintf("/%s/%s/%s/release", owner, repo, baseRef),
-		strings.NewReader(fmt.Sprintf(`{"head_sha": "%s", "priority": %d, "status": "%s"}`, headSha, priority, status)),
+		strings.NewReader(fmt.Sprintf(`{"head_sha": "%s", "head_ref": "%s", "priority": %d, "status": "%s"}`, headSha, ref(priority), priority, status)),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	return req
@@ -836,6 +885,7 @@ func generateProviderState(now time.Time, owner string, repo string, baseRef str
 		sha := "xxx-" + strconv.Itoa(i)
 		known[sha] = &lease.Request{
 			HeadSHA:  sha,
+			HeadRef:  ref(i),
 			Priority: i,
 			Status:   pointer.String(string(status)),
 		}
@@ -852,4 +902,56 @@ func generateProviderState(now time.Time, owner string, repo string, baseRef str
 		Known:         known,
 	}
 	return lease.NewProviderState(opts), &opts
+}
+
+func buildExpectedRequestsContextPayloads(leaseRequests map[string]*lease.Request, expectedStackedPullsNumbers map[string][]int) string {
+	sorted := make([]*lease.Request, 0, len(leaseRequests))
+	results := make([]string, 0, len(leaseRequests))
+
+	for _, r := range leaseRequests {
+		sorted = append(sorted, r)
+	}
+
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Priority < sorted[j].Priority
+	})
+
+	for _, r := range sorted {
+		results = append(results, buildExpectedRequestContextPayload(r, expectedStackedPullsNumbers[r.HeadSHA]))
+	}
+
+	return "[" + strings.Join(results, ",") + "]"
+}
+
+func buildExpectedRequestContextPayload(leaseRequest *lease.Request, expectedStackedPullsNumbers []int) string {
+	expectedStackedPulls := make([]map[string]any, 0, len(expectedStackedPullsNumbers))
+	for _, n := range expectedStackedPullsNumbers {
+		expectedStackedPulls = append(expectedStackedPulls, map[string]any{
+			"number": n,
+		})
+	}
+	raw := map[string]any{
+		"request": map[string]any{
+			"head_sha": leaseRequest.HeadSHA,
+			"head_ref": leaseRequest.HeadRef,
+			"priority": leaseRequest.Priority,
+			"status":   leaseRequest.Status,
+		},
+		"stacked_pull_requests": expectedStackedPulls,
+	}
+	b, _ := json.Marshal(raw)
+
+	return string(b)
+}
+
+func rangeInt(max int) []int {
+	a := make([]int, max)
+	for i := range a {
+		a[i] = i + 1
+	}
+	return a
+}
+
+func ref(number int) string {
+	return fmt.Sprintf("gh-readonly-queue/main/pr-%d-aaabbb", number)
 }

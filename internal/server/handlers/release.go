@@ -10,11 +10,13 @@ import (
 func Release(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 	type releaseRequest struct {
 		HeadSHA  string `json:"head_sha" validate:"required,min=1"`
+		HeadRef  string `json:"head_ref" validate:"required,min=1,ghTempBranchRef"`
 		Priority int    `json:"priority" validate:"required,number,min=1"`
 		Status   string `json:"status" validate:"required,oneof=success failure"`
 	}
 
 	validate := validator.New()
+	registerGhTempBranchRefValidationRuleOrFail(validate)
 
 	return func(c *fiber.Ctx) error {
 		provider, fiberErr := getLeaseProviderOrFail(c, orchestrator)
@@ -31,6 +33,7 @@ func Release(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 		}
 		leaseRequest := &lease.Request{
 			HeadSHA:  input.HeadSHA,
+			HeadRef:  input.HeadRef,
 			Priority: input.Priority,
 			Status:   &input.Status,
 		}
@@ -41,6 +44,10 @@ func Release(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 			return apiError(c, fiber.StatusBadRequest, "Couldn't release the lock", err.Error())
 		}
 
-		return c.Status(fiber.StatusOK).JSON(leaseRequestResponse)
+		reqContext, err := provider.BuildlRequestContext(c.UserContext(), leaseRequestResponse)
+		if err != nil {
+			return apiError(c, fiber.StatusInternalServerError, "Couldn't build request context", err.Error())
+		}
+		return c.Status(fiber.StatusOK).JSON(reqContext)
 	}
 }

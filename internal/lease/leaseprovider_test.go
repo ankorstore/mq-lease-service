@@ -35,12 +35,14 @@ func Test_ProviderState_Marshall(t *testing.T) {
 		"known": {
 			"fghij": {
 				"head_sha": "fghij",
+				"head_ref": "gh-readonly-queue/develop/pr-1-xxx",
 				"priority": 1,
 				"status": "pending",
 				"last_seen_at": "2023-02-17T16:00:10+01:00"
 			},
 			"abcde": {
 				"head_sha": "abcde",
+				"head_ref": "gh-readonly-queue/develop/pr-2-xxx",
 				"priority": 2,
 				"status": "acquired",
 				"last_seen_at": "2023-02-17T16:00:20+01:00"
@@ -63,12 +65,14 @@ func Test_ProviderState_Marshall(t *testing.T) {
 		known: map[string]*Request{
 			"fghij": {
 				HeadSHA:    "fghij",
+				HeadRef:    "gh-readonly-queue/develop/pr-1-xxx",
 				Priority:   1,
 				Status:     pointer.String(StatusPending),
 				lastSeenAt: &expectedRequest1LastSeenAt,
 			},
 			"abcde": {
 				HeadSHA:    "abcde",
+				HeadRef:    "gh-readonly-queue/develop/pr-2-xxx",
 				Priority:   2,
 				Status:     pointer.String(StatusAcquired),
 				lastSeenAt: &expectedRequest2LastSeenAt,
@@ -92,12 +96,14 @@ func Test_ProviderState_Unmarshal(t *testing.T) {
 		known: map[string]*Request{
 			"fghij": {
 				HeadSHA:    "fghij",
+				HeadRef:    "gh-readonly-queue/develop/pr-1-xxx",
 				Priority:   1,
 				Status:     pointer.String(StatusPending),
 				lastSeenAt: &request1LastSeenAt,
 			},
 			"abcde": {
 				HeadSHA:    "abcde",
+				HeadRef:    "gh-readonly-queue/develop/pr-2-xxx",
 				Priority:   2,
 				Status:     pointer.String(StatusAcquired),
 				lastSeenAt: &request2LastSeenAt,
@@ -113,12 +119,14 @@ func Test_ProviderState_Unmarshal(t *testing.T) {
 		"known": {
 			"fghij": {
 				"head_sha": "fghij",
+				"head_ref": "gh-readonly-queue/develop/pr-1-xxx",
 				"priority": 1,
 				"status": "pending",
 				"last_seen_at": "2023-02-17T16:00:10+01:00"
 			},
 			"abcde": {
 				"head_sha": "abcde",
+				"head_ref": "gh-readonly-queue/develop/pr-2-xxx",
 				"priority": 2,
 				"status": "acquired",
 				"last_seen_at": "2023-02-17T16:00:20+01:00"

@@ -48,6 +48,16 @@ type inputValidationError struct {
 	Value       string `json:"value"`
 }
 
+func ghTempBranchRefNameValidation(fl validator.FieldLevel) bool {
+	return lease.ValidateGHTempRef(fl.Field().String())
+}
+
+func registerGhTempBranchRefValidationRuleOrFail(validate *validator.Validate) {
+	if err := validate.RegisterValidation("ghTempBranchRef", ghTempBranchRefNameValidation); err != nil {
+		panic("Error when trying to register GH branch ref validation rule in validator: " + err.Error())
+	}
+}
+
 func validateInputOrFail(c *fiber.Ctx, validate *validator.Validate, subject any) (bool, error) {
 	errs := validateInput(validate, subject)
 	if len(errs) > 0 {

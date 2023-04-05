@@ -9,10 +9,12 @@ import (
 func Acquire(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 	type acquireRequest struct {
 		HeadSHA  string `json:"head_sha" validate:"required,min=1"`
+		HeadRef  string `json:"head_ref" validate:"required,min=1,ghTempBranchRef"`
 		Priority int    `json:"priority" validate:"required,number,min=1"`
 	}
 
 	validate := validator.New()
+	registerGhTempBranchRefValidationRuleOrFail(validate)
 
 	return func(c *fiber.Ctx) error {
 		provider, fiberErr := getLeaseProviderOrFail(c, orchestrator)
@@ -30,6 +32,7 @@ func Acquire(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 
 		leaseRequest := &lease.Request{
 			HeadSHA:  input.HeadSHA,
+			HeadRef:  input.HeadRef,
 			Priority: input.Priority,
 		}
 
@@ -38,6 +41,10 @@ func Acquire(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 			return apiError(c, fiber.StatusConflict, "Couldn't acquire the lock", err.Error())
 		}
 
-		return c.Status(fiber.StatusOK).JSON(leaseRequestResponse)
+		reqContext, err := provider.BuildlRequestContext(c.UserContext(), leaseRequestResponse)
+		if err != nil {
+			return apiError(c, fiber.StatusInternalServerError, "Couldn't build request context", err.Error())
+		}
+		return c.Status(fiber.StatusOK).JSON(reqContext)
 	}
 }

@@ -59,7 +59,7 @@ type StackedPullRequest struct {
 
 type RequestContext struct {
 	Request             *Request              `json:"request"`
-	StackedPullRequests []*StackedPullRequest `json:"stacked_pull_requests"`
+	StackedPullRequests []*StackedPullRequest `json:"stacked_pull_requests,omitempty"`
 }
 
 func (lr *Request) UpdateLastSeenAt(t time.Time) {
@@ -610,6 +610,10 @@ func (lp *leaseProviderImpl) BuildRequestContext(ctx context.Context, leaseReque
 
 	requestContext := &RequestContext{
 		Request: leaseRequest,
+	}
+
+	if pointer.StringDeref(leaseRequest.Status, StatusPending) != StatusAcquired {
+		return requestContext, nil
 	}
 
 	stackedPulls, err := lp.computeStackedPullRequests(leaseRequest)

@@ -112,9 +112,9 @@ var _ = Describe("API", Ordered, func() {
 			})
 			It("should return an non-empty list of requests", func() {
 				leaseRequestsPayloadsJSON := buildExpectedRequestsContextPayloads(providerStateOpts.Known, map[string][]int{
-					"xxx-1": rangeInt(1),
-					"xxx-2": rangeInt(2),
-					"xxx-3": rangeInt(3),
+					"xxx-1": {},
+					"xxx-2": {},
+					"xxx-3": {},
 					"xxx-4": rangeInt(4),
 				})
 				acquiredLeaseRequestPayloadJSON := buildExpectedRequestContextPayload(providerStateOpts.Acquired, rangeInt(4))
@@ -181,9 +181,9 @@ var _ = Describe("API", Ordered, func() {
 				})
 				It("should return an non-empty list of requests", func() {
 					leaseRequestsPayloadsJSON := buildExpectedRequestsContextPayloads(providerStateOpts.Known, map[string][]int{
-						"xxx-1": rangeInt(1),
-						"xxx-2": rangeInt(2),
-						"xxx-3": rangeInt(3),
+						"xxx-1": {},
+						"xxx-2": {},
+						"xxx-3": {},
 						"xxx-4": rangeInt(4),
 					})
 					acquiredLeaseRequestPayloadJSON := buildExpectedRequestContextPayload(providerStateOpts.Acquired, rangeInt(4))
@@ -309,7 +309,7 @@ var _ = Describe("API", Ordered, func() {
 							HeadRef:  headRef,
 							Priority: priority,
 							Status:   pointer.String(lease.StatusPending),
-						}, rangeInt(configHelper.DefaultConfigRepoExpectedRequestCount-1))
+						}, []int{})
 						Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 					})
 				})
@@ -428,7 +428,7 @@ var _ = Describe("API", Ordered, func() {
 								HeadRef:  headRef,
 								Priority: priority,
 								Status:   pointer.String(lease.StatusPending),
-							}, rangeInt(1))
+							}, []int{})
 							Expect(acquireRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -515,7 +515,7 @@ var _ = Describe("API", Ordered, func() {
 								HeadRef:  headRef,
 								Priority: priority,
 								Status:   pointer.String(lease.StatusCompleted),
-							}, rangeInt(2))
+							}, []int{})
 							Expect(releaseRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -531,7 +531,7 @@ var _ = Describe("API", Ordered, func() {
 								HeadRef:  headRef,
 								Priority: priority,
 								Status:   pointer.String(lease.StatusFailure),
-							}, rangeInt(1))
+							}, []int{})
 							Expect(releaseRespBody).To(MatchJSON(expectedPayload))
 						})
 					})
@@ -555,7 +555,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(1),
 						Priority: 1,
 						Status:   pointer.String(lease.StatusPending),
-					}, rangeInt(1))))
+					}, []int{})))
 				})
 				By("test acquire, request 2 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
@@ -565,7 +565,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(2),
 						Priority: 2,
 						Status:   pointer.String(lease.StatusPending),
-					}, rangeInt(2))))
+					}, []int{})))
 				})
 				By("sleeping for stabilize duration", func() {
 					currentTime := now
@@ -580,7 +580,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(1),
 						Priority: 1,
 						Status:   pointer.String(lease.StatusPending),
-					}, rangeInt(1))))
+					}, []int{})))
 				})
 				By("test acquire, request 2 => should be acquired", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
@@ -600,7 +600,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(2),
 						Priority: 2,
 						Status:   pointer.String(lease.StatusCompleted),
-					}, rangeInt(2))))
+					}, []int{})))
 				})
 				By("test acquire, request 1 => should be completed", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
@@ -629,7 +629,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(1),
 						Priority: 1,
 						Status:   pointer.String(lease.StatusPending),
-					}, rangeInt(1))))
+					}, []int{})))
 				})
 				By("test acquire, request 2 => should be pending", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
@@ -639,7 +639,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(2),
 						Priority: 2,
 						Status:   pointer.String(lease.StatusPending),
-					}, rangeInt(2))))
+					}, []int{})))
 				})
 				By("sleeping for stabilize duration", func() {
 					currentTime := now
@@ -654,7 +654,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(1),
 						Priority: 1,
 						Status:   pointer.String(lease.StatusPending),
-					}, rangeInt(1))))
+					}, []int{})))
 				})
 				By("test acquire, request 2 => should be acquired", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-2", 2))
@@ -674,7 +674,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(2),
 						Priority: 2,
 						Status:   pointer.String(lease.StatusFailure),
-					}, rangeInt(1))))
+					}, []int{})))
 				})
 				By("test acquire, request 1 => should be acquired", func() {
 					resp, body := apiCall(srv, acquireReq(owner, repo, baseRef, "xxx-1", 1))
@@ -705,7 +705,7 @@ var _ = Describe("API", Ordered, func() {
 							HeadRef:  ref(i),
 							Priority: i,
 							Status:   pointer.String(lease.StatusPending),
-						}, rangeInt(i))))
+						}, []int{})))
 					})
 				}
 				By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
@@ -726,7 +726,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(max),
 						Priority: max,
 						Status:   pointer.String(lease.StatusCompleted),
-					}, rangeInt(max))))
+					}, []int{})))
 				})
 				for i := 1; i <= max-1; i++ {
 					By(fmt.Sprintf("test acquire, request %d => should be completed", i), func() {
@@ -759,7 +759,7 @@ var _ = Describe("API", Ordered, func() {
 							HeadRef:  ref(i),
 							Priority: i,
 							Status:   pointer.String(lease.StatusPending),
-						}, rangeInt(i))))
+						}, []int{})))
 					})
 				}
 				By(fmt.Sprintf("test acquire, request %d => should be acquired", max), func() {
@@ -780,7 +780,7 @@ var _ = Describe("API", Ordered, func() {
 						HeadRef:  ref(max),
 						Priority: max,
 						Status:   pointer.String(lease.StatusFailure),
-					}, rangeInt(max-1))))
+					}, []int{})))
 				})
 				for i := 1; i <= max-2; i++ {
 					By(fmt.Sprintf("test acquire, request %d => should be pending", i), func() {
@@ -791,7 +791,7 @@ var _ = Describe("API", Ordered, func() {
 							HeadRef:  ref(i),
 							Priority: i,
 							Status:   pointer.String(lease.StatusPending),
-						}, rangeInt(i))))
+						}, []int{})))
 					})
 				}
 				By(fmt.Sprintf("test acquire, request %d => should be acquired", max-1), func() {
@@ -937,7 +937,9 @@ func buildExpectedRequestContextPayload(leaseRequest *lease.Request, expectedSta
 			"priority": leaseRequest.Priority,
 			"status":   leaseRequest.Status,
 		},
-		"stacked_pull_requests": expectedStackedPulls,
+	}
+	if len(expectedStackedPulls) > 0 {
+		raw["stacked_pull_requests"] = expectedStackedPulls
 	}
 	b, _ := json.Marshal(raw)
 

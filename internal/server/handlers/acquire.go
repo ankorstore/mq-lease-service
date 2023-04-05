@@ -41,7 +41,7 @@ func Acquire(orchestrator lease.ProviderOrchestrator) func(c *fiber.Ctx) error {
 			return apiError(c, fiber.StatusConflict, "Couldn't acquire the lock", err.Error())
 		}
 
-		reqContext, err := provider.BuildlRequestContext(c.UserContext(), leaseRequestResponse)
+		reqContext, err := provider.BuildRequestContext(c.UserContext(), leaseRequestResponse)
 		if err != nil {
 			return apiError(c, fiber.StatusInternalServerError, "Couldn't build request context", err.Error())
 		}

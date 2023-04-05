@@ -181,7 +181,7 @@ func (ps *ProviderState) Unmarshal(b []byte) error {
 type Provider interface {
 	Acquire(ctx context.Context, leaseRequest *Request) (*Request, error)
 	Release(ctx context.Context, leaseRequest *Request) (*Request, error)
-	BuildlRequestContext(ctx context.Context, leaseRequest *Request) (*RequestContext, error)
+	BuildRequestContext(ctx context.Context, leaseRequest *Request) (*RequestContext, error)
 	HydrateFromState(ctx context.Context) error
 	Clear(ctx context.Context)
 }
@@ -233,7 +233,7 @@ func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
 	requestContexts := make([]*RequestContext, 0, len(lp.state.known))
 	// build lease request context (= request data + stacked Pulls data)
 	for _, r := range lp.state.known {
-		reqContext, err := lp.BuildlRequestContext(context.Background(), r)
+		reqContext, err := lp.BuildRequestContext(context.Background(), r)
 		if err != nil {
 			return []byte{}, err
 		}
@@ -246,7 +246,7 @@ func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
 	})
 
 	// build the request context for the acquired request
-	acquiredReqContext, err := lp.BuildlRequestContext(context.Background(), lp.state.acquired)
+	acquiredReqContext, err := lp.BuildRequestContext(context.Background(), lp.state.acquired)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -602,7 +602,7 @@ func (lp *leaseProviderImpl) Release(ctx context.Context, leaseRequest *Request)
 	return req, fmt.Errorf("unknown condition for commit %s", leaseRequest.HeadSHA)
 }
 
-func (lp *leaseProviderImpl) BuildlRequestContext(ctx context.Context, leaseRequest *Request) (*RequestContext, error) {
+func (lp *leaseProviderImpl) BuildRequestContext(ctx context.Context, leaseRequest *Request) (*RequestContext, error) {
 	// a request context is a combination of a request object and its stacked pull requests info
 	if nil == leaseRequest {
 		return nil, nil

@@ -29,6 +29,7 @@ type ProviderOpts struct {
 	StabilizeDuration    time.Duration
 	TTL                  time.Duration
 	ExpectedRequestCount int
+	DelayAssignmentCount int
 	ID                   string
 	Clock                clock.PassiveClock
 	Storage              storage.Storage[*ProviderState]
@@ -46,11 +47,12 @@ const (
 )
 
 type Request struct {
-	HeadSHA    string  `json:"head_sha"`
-	HeadRef    string  `json:"head_ref"`
-	Priority   int     `json:"priority"`
-	Status     *string `json:"status,omitempty"`
-	lastSeenAt *time.Time
+	HeadSHA          string  `json:"head_sha"`
+	HeadRef          string  `json:"head_ref"`
+	Priority         int     `json:"priority"`
+	Status           *string `json:"status,omitempty"`
+	lastSeenAt       *time.Time
+	acquireCountdown *int
 }
 
 type StackedPullRequest struct {
@@ -75,6 +77,7 @@ func (lr *Request) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("lease_request_head_sha", lr.HeadSHA).
 		Str("lease_request_head_ref", lr.HeadRef).
 		Int("lease_request_priority", lr.Priority).
+		Int("lease_request_acquire_countdown", pointer.IntDeref(lr.acquireCountdown, 0)).
 		Str("lease_request_status", status)
 }
 
@@ -457,12 +460,27 @@ func (lp *leaseProviderImpl) evaluateRequest(ctx context.Context, req *Request) 
 
 	// Got the max priority, now check if we are the winner
 	if req.Priority == maxPriority {
-		req.Status = pointer.String(StatusAcquired)
-		lp.state.acquired = req
+
+		// In order to prevent race conditions, there's the option to delay the lock acquisition
+		// This is useful when the lock is acquired by a CI job that is canceled or restarted. There can be a short delay.
+		req.acquireCountdown = pointer.Int(pointer.IntDeref(req.acquireCountdown, lp.opts.DelayAssignmentCount+1) - 1)
+		if *req.acquireCountdown > 0 {
+			log.Ctx(ctx).
+				Debug().
+				EmbedObject(req).
+				Msg("Delaying lock acquisition")
+			return req
+		}
+
 		log.Ctx(ctx).
 			Debug().
 			EmbedObject(req).
 			Msg("Current lease request has the higher priority. It then acquires the lock")
+
+		// Acquire lease
+		req.Status = pointer.String(StatusAcquired)
+		lp.state.acquired = req
+
 		log.Ctx(ctx).
 			Info().
 			EmbedObject(req).

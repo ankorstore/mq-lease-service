@@ -28,9 +28,5 @@ func load(path string, config interface{}) error {
 		return err
 	}
 
-	if err := yaml.Unmarshal([]byte(templated), config); err != nil {
-		return err
-	}
-
-	return nil
+	return yaml.Unmarshal([]byte(templated), config)
 }

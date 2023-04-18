@@ -54,6 +54,7 @@ func NewProviderOrchestrator(opts NewProviderOrchestratorOpts) ProviderOrchestra
 			StabilizeDuration:    time.Second * time.Duration(repository.StabilizeDuration),
 			TTL:                  time.Second * time.Duration(repository.TTL),
 			ExpectedRequestCount: repository.ExpectedRequestCount,
+			DelayAssignmentCount: repository.DelayLeaseAssignmentBy,
 			ID:                   key,
 			Clock:                opts.Clock,
 			Storage:              opts.Storage,

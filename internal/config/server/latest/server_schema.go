@@ -13,4 +13,6 @@ type GithubRepositoryConfig struct {
 	StabilizeDuration    int    `yaml:"stabilize_duration_seconds"`
 	TTL                  int    `yaml:"ttl_seconds"`
 	ExpectedRequestCount int    `yaml:"expected_request_count"`
+	// DelayLEaseASsignmentBy is the number of times a lease can be delayed before it is assigned.
+	DelayLeaseAssignmentBy int `yaml:"delay_lease_assignment_by"`
 }

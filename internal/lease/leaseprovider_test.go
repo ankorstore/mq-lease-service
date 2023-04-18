@@ -453,7 +453,7 @@ type clearTestFakeStorage struct{ state *ProviderState }
 func (s *clearTestFakeStorage) Init() error                                   { return nil }
 func (s *clearTestFakeStorage) Close() error                                  { return nil }
 func (s *clearTestFakeStorage) Hydrate(context.Context, *ProviderState) error { return nil }
-func (s *clearTestFakeStorage) Save(ctx context.Context, obj *ProviderState) error {
+func (s *clearTestFakeStorage) Save(_ context.Context, obj *ProviderState) error {
 	s.state = obj
 	return nil
 }
@@ -742,4 +742,34 @@ func Test_leaseProviderImpl__FullLoop_ReleaseFromInvalidHeadSHA(t *testing.T) {
 		Status:   pointer.String(StatusSuccess),
 	})
 	assert.Error(t, err)
+}
+
+func Test_leaseProviderImpl__FullLoop_DelayedAcquisition(t *testing.T) {
+	lp := NewLeaseProvider(ProviderOpts{TTL: 1 * time.Hour, StabilizeDuration: time.Minute, ExpectedRequestCount: 2, DelayAssignmentCount: 2})
+
+	req1 := &Request{
+		HeadSHA:  "sha1",
+		Priority: 1,
+	}
+	req2 := &Request{
+		HeadSHA:  "sha2",
+		Priority: 2,
+	}
+
+	// Inject the two requests
+	req1, err := lp.Acquire(context.Background(), req1)
+	assert.NoError(t, err)
+	assert.Equal(t, StatusPending, *req1.Status)
+
+	// this should be delayed and only acquire after the 3rd request
+	req2, err = lp.Acquire(context.Background(), req2)
+	assert.NoError(t, err)
+	assert.Equal(t, StatusPending, *req2.Status)
+	req2, err = lp.Acquire(context.Background(), req2)
+	assert.NoError(t, err)
+	assert.Equal(t, StatusPending, *req2.Status)
+	// Now it should acquire the lease
+	req2, err = lp.Acquire(context.Background(), req2)
+	assert.NoError(t, err)
+	assert.Equal(t, StatusAcquired, *req2.Status)
 }

@@ -18,7 +18,7 @@ type AppInfo interface {
 // locationHook adds the log location
 type locationHook struct{}
 
-func (h locationHook) Run(e *zerolog.Event, l zerolog.Level, msg string) {
+func (h locationHook) Run(e *zerolog.Event, _ zerolog.Level, _ string) {
 	_, file, line, ok := runtime.Caller(3)
 	if ok {
 		e.Str("location", fmt.Sprintf("%s:%d", file, line))

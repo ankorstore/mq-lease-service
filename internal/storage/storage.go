@@ -133,7 +133,7 @@ func (s *storageImpl[T]) Hydrate(ctx context.Context, defaultObj T) error {
 
 // Save store the provided object in the storage
 // the provided object should at least be able to return a non-null and unique Identifier (via the GetIdentifier() method)
-func (s *storageImpl[T]) Save(ctx context.Context, obj T) error {
+func (s *storageImpl[T]) Save(_ context.Context, obj T) error {
 	var err error
 	id := obj.GetIdentifier()
 	b, err := obj.Marshal()

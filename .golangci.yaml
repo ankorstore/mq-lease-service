@@ -27,7 +27,6 @@ linters:
     - unconvert
     - govet
     - typecheck
-    - depguard
     - exportloopref
     - gofumpt
     - goimports
@@ -41,6 +40,7 @@ linters:
     - gosec
   disable:
     - unparam
+    - depguard
 
 issues:
   fix: true

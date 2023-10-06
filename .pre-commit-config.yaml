@@ -1,6 +1,6 @@
 repos:
   - repo: git@github.com:ankorstore/pre-commit.git
-    rev: e1b70866e5804334d8434d1dde92a558783761ff
+    rev: f2058e70cf98824f0b62ad2bf71bfced5612ff35
     hooks:
       - id: required
 

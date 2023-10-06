@@ -11,6 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+const metricNamespace = "aks_mq_lease_service"
+
 type Metrics interface {
 	GetFactory() promauto.Factory
 	GetHTTPHandler() http.Handler
@@ -79,49 +81,49 @@ func (m *metricsImpl) GetHTTPHandler() http.Handler {
 }
 
 func (m *metricsImpl) NewCounter(opts prometheus.CounterOpts) prometheus.Counter {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewCounter(opts)
 }
 
 func (m *metricsImpl) NewCounterVec(opts prometheus.CounterOpts, labelNames []string) *prometheus.CounterVec {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewCounterVec(opts, m.mergeLabelsNames(labelNames))
 }
 
 func (m *metricsImpl) NewGauge(opts prometheus.GaugeOpts) prometheus.Gauge {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewGauge(opts)
 }
 
 func (m *metricsImpl) NewGaugeVec(opts prometheus.GaugeOpts, labelNames []string) *prometheus.GaugeVec {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewGaugeVec(opts, m.mergeLabelsNames(labelNames))
 }
 
 func (m *metricsImpl) NewSummary(opts prometheus.SummaryOpts) prometheus.Summary {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewSummary(opts)
 }
 
 func (m *metricsImpl) NewSummaryVec(opts prometheus.SummaryOpts, labelNames []string) *prometheus.SummaryVec {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewSummaryVec(opts, m.mergeLabelsNames(labelNames))
 }
 
 func (m *metricsImpl) NewHistogram(opts prometheus.HistogramOpts) prometheus.Histogram {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewHistogram(opts)
 }
 
 func (m *metricsImpl) NewHistogramVec(opts prometheus.HistogramOpts, labelNames []string) *prometheus.HistogramVec {
-	opts.Namespace = m.appName
+	opts.Namespace = metricNamespace
 	opts.ConstLabels = m.mergeLabels(opts.ConstLabels)
 	return m.GetFactory().NewHistogramVec(opts, m.mergeLabelsNames(labelNames))
 }

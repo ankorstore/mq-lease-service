@@ -16,6 +16,7 @@ const (
 	DefaultConfigRepoStabilizeDurationSeconds = 30
 	DefaultConfigRepoExpectedRequestCount     = 4
 	DefaultConfigRepoTTLSeconds               = 200
+	DefaultConfigRepoDelayAssignmentCount     = 0
 )
 
 // baseConfigContent default YAML configuration used in GenerateDefaultConfig method
@@ -27,6 +28,7 @@ repositories:
     stabilize_duration_seconds: ${E2E_CONFIG_REPO_STABILIZE_DURATION_SECONDS}
     expected_request_count: ${E2E_CONFIG_REPO_EXPECTED_REQUEST_COUNT}
     ttl_seconds: ${E2E_CONFIG_REPO_TTL_SECONDS}
+    delay_lease_assignment_by: ${E2E_CONFIG_REPO_DELAY_ASSIGNMENT_COUNT}
 `
 
 type HelperOption func() map[string]string
@@ -81,6 +83,15 @@ func WithTTLSeconds(duration int) HelperOption {
 	return func() map[string]string {
 		return map[string]string{
 			"E2E_CONFIG_REPO_TTL_SECONDS": strconv.Itoa(duration),
+		}
+	}
+}
+
+// WithDelayAssignmentCount override the DelayAssignmentCount value used in base configuration YAML (i.e. don't use the default one)
+func WithDelayAssignmentCount(count int) HelperOption {
+	return func() map[string]string {
+		return map[string]string{
+			"E2E_CONFIG_REPO_DELAY_ASSIGNMENT_COUNT": strconv.Itoa(count),
 		}
 	}
 }
@@ -156,6 +167,7 @@ func (h *Helper) LoadDefaultConfig(options ...HelperOption) (*latest.ServerConfi
 			"E2E_CONFIG_REPO_STABILIZE_DURATION_SECONDS": strconv.Itoa(DefaultConfigRepoStabilizeDurationSeconds),
 			"E2E_CONFIG_REPO_EXPECTED_REQUEST_COUNT":     strconv.Itoa(DefaultConfigRepoExpectedRequestCount),
 			"E2E_CONFIG_REPO_TTL_SECONDS":                strconv.Itoa(DefaultConfigRepoTTLSeconds),
+			"E2E_CONFIG_REPO_DELAY_ASSIGNMENT_COUNT":     strconv.Itoa(DefaultConfigRepoDelayAssignmentCount),
 		}
 	}
 

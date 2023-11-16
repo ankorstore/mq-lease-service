@@ -20,12 +20,13 @@ var _ = Describe("Config", Ordered, func() {
 				cfg, _ = configHelper.LoadDefaultConfig()
 				Expect(cfg).To(Equal(&latest.ServerConfig{Repositories: []*latest.GithubRepositoryConfig{
 					{
-						Owner:                config.DefaultConfigRepoOwner,
-						Name:                 config.DefaultConfigRepoName,
-						BaseRef:              config.DefaultConfigRepoBaseRef,
-						StabilizeDuration:    config.DefaultConfigRepoStabilizeDurationSeconds,
-						ExpectedRequestCount: config.DefaultConfigRepoExpectedRequestCount,
-						TTL:                  config.DefaultConfigRepoTTLSeconds,
+						Owner:                  config.DefaultConfigRepoOwner,
+						Name:                   config.DefaultConfigRepoName,
+						BaseRef:                config.DefaultConfigRepoBaseRef,
+						StabilizeDuration:      config.DefaultConfigRepoStabilizeDurationSeconds,
+						ExpectedRequestCount:   config.DefaultConfigRepoExpectedRequestCount,
+						TTL:                    config.DefaultConfigRepoTTLSeconds,
+						DelayLeaseAssignmentBy: config.DefaultConfigRepoDelayAssignmentCount,
 					},
 				}}))
 
@@ -36,12 +37,13 @@ var _ = Describe("Config", Ordered, func() {
 				)
 				Expect(cfg).To(Equal(&latest.ServerConfig{Repositories: []*latest.GithubRepositoryConfig{
 					{
-						Owner:                config.DefaultConfigRepoOwner,
-						Name:                 "another-repo",
-						BaseRef:              "develop",
-						StabilizeDuration:    3,
-						ExpectedRequestCount: config.DefaultConfigRepoExpectedRequestCount,
-						TTL:                  config.DefaultConfigRepoTTLSeconds,
+						Owner:                  config.DefaultConfigRepoOwner,
+						Name:                   "another-repo",
+						BaseRef:                "develop",
+						StabilizeDuration:      3,
+						ExpectedRequestCount:   config.DefaultConfigRepoExpectedRequestCount,
+						TTL:                    config.DefaultConfigRepoTTLSeconds,
+						DelayLeaseAssignmentBy: config.DefaultConfigRepoDelayAssignmentCount,
 					},
 				}}))
 			})

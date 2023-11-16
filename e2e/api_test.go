@@ -89,9 +89,15 @@ var _ = Describe("API", Ordered, func() {
 					"%s:%s:%s": {
 						"last_updated_at": "%s",
 						"acquired": null,
-						"known": []
+						"known": [],
+						"config": {
+							"stabilize_duration": %d,
+							"ttl": %d,
+							"expected_request_count": %d,
+							"delay_assignment_count": %d
+						}
 					}
-				}`, owner, repo, baseRef, now.Format(time.RFC3339))
+				}`, owner, repo, baseRef, now.Format(time.RFC3339), configHelper.DefaultConfigRepoStabilizeDurationSeconds, configHelper.DefaultConfigRepoTTLSeconds, configHelper.DefaultConfigRepoExpectedRequestCount, configHelper.DefaultConfigRepoDelayAssignmentCount)
 
 				Expect(providerListingRespBody).To(MatchJSON(expectedPayload))
 			})
@@ -122,9 +128,15 @@ var _ = Describe("API", Ordered, func() {
 					"%s:%s:%s": {
 						"last_updated_at": "%s",
 						"acquired": %s,
-						"known": %s
+						"known": %s,
+						"config": {
+							"stabilize_duration": %d,
+							"ttl": %d,
+							"expected_request_count": %d,
+							"delay_assignment_count": %d
+						}
 					}
-				}`, owner, repo, baseRef, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), acquiredLeaseRequestPayloadJSON, leaseRequestsPayloadsJSON)
+				}`, owner, repo, baseRef, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), acquiredLeaseRequestPayloadJSON, leaseRequestsPayloadsJSON, configHelper.DefaultConfigRepoStabilizeDurationSeconds, configHelper.DefaultConfigRepoTTLSeconds, configHelper.DefaultConfigRepoExpectedRequestCount, configHelper.DefaultConfigRepoDelayAssignmentCount)
 
 				Expect(providerListingRespBody).To(MatchJSON(expectedPayload))
 			})
@@ -159,8 +171,14 @@ var _ = Describe("API", Ordered, func() {
 					expectedPayload := fmt.Sprintf(`{
 						"last_updated_at": "%s",
 						"acquired": null,
-						"known": []
-					}`, now.Format(time.RFC3339))
+						"known": [],
+						"config": {
+							"stabilize_duration": %d,
+							"ttl": %d,
+							"expected_request_count": %d,
+							"delay_assignment_count": %d
+						}
+					}`, now.Format(time.RFC3339), configHelper.DefaultConfigRepoStabilizeDurationSeconds, configHelper.DefaultConfigRepoTTLSeconds, configHelper.DefaultConfigRepoExpectedRequestCount, configHelper.DefaultConfigRepoDelayAssignmentCount)
 
 					Expect(providerDetailsRespBody).To(MatchJSON(expectedPayload))
 				})
@@ -190,8 +208,14 @@ var _ = Describe("API", Ordered, func() {
 					expectedPayload := fmt.Sprintf(`{
 						"last_updated_at": "%s",
 						"acquired": %s,
-						"known": %s
-					}`, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), acquiredLeaseRequestPayloadJSON, leaseRequestsPayloadsJSON)
+						"known": %s,
+						"config": {
+							"stabilize_duration": %d,
+							"ttl": %d,
+							"expected_request_count": %d,
+							"delay_assignment_count": %d
+						}
+					}`, providerStateOpts.LastUpdatedAt.Format(time.RFC3339), acquiredLeaseRequestPayloadJSON, leaseRequestsPayloadsJSON, configHelper.DefaultConfigRepoStabilizeDurationSeconds, configHelper.DefaultConfigRepoTTLSeconds, configHelper.DefaultConfigRepoExpectedRequestCount, configHelper.DefaultConfigRepoDelayAssignmentCount)
 
 					Expect(providerDetailsRespBody).To(MatchJSON(expectedPayload))
 				})
@@ -220,8 +244,14 @@ var _ = Describe("API", Ordered, func() {
 					expectedPayload := fmt.Sprintf(`{
 						"last_updated_at": "%s",
 						"acquired": null,
-						"known": []
-					}`, clk.Now().Format(time.RFC3339))
+						"known": [],
+						"config": {
+							"stabilize_duration": %d,
+							"ttl": %d,
+							"expected_request_count": %d,
+							"delay_assignment_count": %d
+						}
+					}`, clk.Now().Format(time.RFC3339), configHelper.DefaultConfigRepoStabilizeDurationSeconds, configHelper.DefaultConfigRepoTTLSeconds, configHelper.DefaultConfigRepoExpectedRequestCount, configHelper.DefaultConfigRepoDelayAssignmentCount)
 					Expect(respBody).To(MatchJSON(expectedPayload))
 				}
 

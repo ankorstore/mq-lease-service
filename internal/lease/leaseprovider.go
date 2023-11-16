@@ -254,14 +254,28 @@ func (lp *leaseProviderImpl) MarshalJSON() ([]byte, error) {
 		return []byte{}, err
 	}
 
+	type providerConfigJSON struct {
+		StabilizeDuration    int `json:"stabilize_duration"`
+		TTL                  int `json:"ttl"`
+		ExpectedRequestCount int `json:"expected_request_count"`
+		DelayAssignmentCount int `json:"delay_assignment_count"`
+	}
+
 	return json.Marshal(&struct {
-		LastUpdatedAt time.Time         `json:"last_updated_at"`
-		Acquired      *RequestContext   `json:"acquired"`
-		Known         []*RequestContext `json:"known"`
+		LastUpdatedAt time.Time          `json:"last_updated_at"`
+		Acquired      *RequestContext    `json:"acquired"`
+		Known         []*RequestContext  `json:"known"`
+		Config        providerConfigJSON `json:"config"`
 	}{
 		LastUpdatedAt: lp.state.lastUpdatedAt,
 		Acquired:      acquiredReqContext,
 		Known:         requestContexts,
+		Config: providerConfigJSON{
+			StabilizeDuration:    int(lp.opts.StabilizeDuration.Seconds()),
+			TTL:                  int(lp.opts.TTL.Seconds()),
+			ExpectedRequestCount: lp.opts.ExpectedRequestCount,
+			DelayAssignmentCount: lp.opts.DelayAssignmentCount,
+		},
 	})
 }
 

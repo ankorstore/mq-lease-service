@@ -17,10 +17,11 @@ import (
 	storageHelper "github.com/ankorstore/mq-lease-service/e2e/helpers/storage"
 	"github.com/ankorstore/mq-lease-service/internal/lease"
 	"github.com/ankorstore/mq-lease-service/internal/server"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2" //nolint
+	. "github.com/onsi/gomega" //nolint
+	"golang.org/x/sync/errgroup"
 	"k8s.io/utils/clock/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/pointer" //nolint
 )
 
 var _ = Describe("API", Ordered, func() {
@@ -60,13 +61,24 @@ var _ = Describe("API", Ordered, func() {
 		repo = configHelper.DefaultConfigRepoName
 		baseRef = configHelper.DefaultConfigRepoBaseRef
 
+		ctx, cancel := context.WithCancel(context.Background())
+		grp := errgroup.Group{}
 		// bootstrap a new server (will run the usual bootstrapping sequence, like starting the storage etc...)
-		srv = serverHelper.CreateAndInit(configPath, storageDir, clk)
+		srv = serverHelper.New(configPath, storageDir, clk)
+		grp.Go(func() error {
+			return srv.RunTest(ctx)
+		})
+
+		waitCtx, waitCtxCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer waitCtxCancel()
+		Expect(srv.WaitReady(waitCtx)).To(BeTrue())
+
 		DeferCleanup(func() {
-			// Will gracefully shut down the server (useful to test if shutdown methods work correctly)
-			serverHelper.Cleanup(srv)
+			cancel()
 			// Will clean up any env vars configured to test the placeholder replacement feature of the config
 			config.CleanupEnv()
+			// Wait for exit
+			Expect(grp.Wait()).To(BeNil())
 		})
 	})
 

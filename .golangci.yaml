@@ -27,7 +27,6 @@ linters:
     - unconvert
     - govet
     - typecheck
-    - exportloopref
     - gofumpt
     - goimports
     - gocritic

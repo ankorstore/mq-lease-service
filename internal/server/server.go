@@ -19,20 +19,18 @@ import (
 	fiberbasicauth "github.com/gofiber/fiber/v2/middleware/basicauth"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 	"k8s.io/utils/clock"
 )
 
 type Server interface {
-	// Init set up the API server dependencies, open a connection to the storage, register the API routes, etc.
-	Init() error
-	// Start is starting the server listening loop
-	Start() error
-	// Shutdown will attempt to do a graceful shutdown of the server, and will clean up the dependencies (close the storage, etc...)
-	Shutdown() error
+	// Run the server
+	Run(ctx context.Context) error
 
 	// Testing
+	RunTest(ctx context.Context) error
+	WaitReady(ctx context.Context) bool
 
 	// Test should be called to test an API endpoint. This will relay the call to fiber app.Test() method. (TESTING)
 	Test(req *http.Request, msTimeout ...int) (*http.Response, error)
@@ -42,7 +40,6 @@ type Server interface {
 
 type NewOpts struct {
 	Port               int
-	Logger             *zerolog.Logger
 	ConfigPath         string
 	PersistentStateDir string
 	Clock              clock.PassiveClock
@@ -51,38 +48,40 @@ type NewOpts struct {
 // New returns a server instance
 func New(opts NewOpts) Server {
 	return &serverImpl{
+		waitReady:          make(chan struct{}, 1),
 		port:               opts.Port,
 		configPath:         opts.ConfigPath,
-		logger:             opts.Logger,
 		persistentStateDir: opts.PersistentStateDir,
 		clock:              opts.Clock,
 	}
 }
 
 type serverImpl struct {
+	waitReady          chan struct{}
 	port               int
 	configPath         string
 	persistentStateDir string
 	storage            storage.Storage[*lease.ProviderState]
 	app                *fiber.App
-	logger             *zerolog.Logger
-	ctx                context.Context
 	clock              clock.PassiveClock
 	orchestrator       lease.ProviderOrchestrator
-	initialized        bool
 }
 
-// Init set up the API server dependencies, open a connection to the storage, register the API routes, etc.
-func (s *serverImpl) Init() error {
-	if s.initialized {
-		return errors.New("server already initialized")
+func (s *serverImpl) WaitReady(ctx context.Context) bool {
+	select {
+	case <-s.waitReady:
+		return true
+	case <-ctx.Done():
+		return false
 	}
-	s.initialized = true
+}
 
-	s.ctx = s.logger.WithContext(context.Background())
+func (s *serverImpl) setup(ctx context.Context) error {
+	// Make sure we mark the server as ready before returning (this does not cover errors, in the setup process, they need to be checked separately)
+	defer close(s.waitReady)
 
 	// Setup state storage
-	s.storage = storage.New[*lease.ProviderState](s.ctx, s.persistentStateDir)
+	s.storage = storage.New[*lease.ProviderState](ctx, s.persistentStateDir)
 	if err := s.storage.Init(); err != nil {
 		return fmt.Errorf("failed to init storage: %w", err)
 	}
@@ -90,9 +89,9 @@ func (s *serverImpl) Init() error {
 	//  defer the closing of the storage if anything is panicking in the rest of the Init method
 	defer func() {
 		if r := recover(); r != nil {
-			log.Ctx(s.ctx).Warn().Msg("Panicking at server initialisation. Try to gracefully close the storage.")
+			log.Ctx(ctx).Warn().Msg("Panicking at server initialisation. Try to gracefully close the storage.")
 			if err := s.storage.Close(); err != nil {
-				log.Ctx(s.ctx).Error().Err(err).Msg("Failed to close storage")
+				log.Ctx(ctx).Error().Err(err).Msg("Failed to close storage")
 			}
 			panic(r)
 		}
@@ -121,7 +120,7 @@ func (s *serverImpl) Init() error {
 		Metrics:      metricsServ,
 	})
 	// tries to hydrate the states of managed providers from the storage
-	if err := s.orchestrator.HydrateFromState(s.ctx); err != nil {
+	if err := s.orchestrator.HydrateFromState(ctx); err != nil {
 		return fmt.Errorf("failed to hydrate orchestrator providers from state: %w", err)
 	}
 
@@ -132,7 +131,7 @@ func (s *serverImpl) Init() error {
 		metricsServ,
 		"/metrics",
 	))
-	s.app.Use(middlewares.LoggerMiddleware(s.logger))
+	s.app.Use(middlewares.LoggerMiddleware(log.Ctx(ctx)))
 	// recover middleware allow us to avoid a panic (happening in middlewares or http handlers) to stop the server
 	// this will result in a 500, but the server will continue to accept requests.
 	s.app.Use(fiberrecover.New(fiberrecover.Config{
@@ -144,7 +143,7 @@ func (s *serverImpl) Init() error {
 
 	// Configure basic auth if needed
 	if cfg.AuthConfig != nil && cfg.AuthConfig.BasicAuth != nil {
-		log.Ctx(s.ctx).Info().Msg("Basic auth enabled")
+		log.Ctx(ctx).Info().Msg("Basic auth enabled")
 		s.app.Use(fiberbasicauth.New(fiberbasicauth.Config{
 			Users: cfg.AuthConfig.BasicAuth.Users,
 		}))
@@ -158,34 +157,42 @@ func (s *serverImpl) Init() error {
 	return nil
 }
 
-// Start is starting the server listening loop
-func (s *serverImpl) Start() error {
-	if !s.initialized {
-		return errors.New("server has not been initialized")
+// RunTest runs the server in test mode (actually does not listen)
+func (s *serverImpl) RunTest(ctx context.Context) error {
+	err := s.setup(ctx)
+	if err != nil {
+		return err
 	}
-
-	log.Ctx(s.ctx).Info().Msg("Starting server...")
-	return s.app.Listen(":" + strconv.Itoa(s.port))
+	<-ctx.Done()
+	return s.storage.Close()
 }
 
-// Shutdown will attempt to do a graceful shutdown of the server, and will clean up the dependencies (close the storage, etc...)
-func (s *serverImpl) Shutdown() error {
-	if !s.initialized {
-		return errors.New("server has not been initialized")
+// Run operates the lease server
+func (s *serverImpl) Run(ctx context.Context) error {
+	err := s.setup(ctx)
+	if err != nil {
+		return err
 	}
 
-	log.Ctx(s.ctx).Warn().Msg("Gracefully shutting down...")
-	defer func(s *serverImpl) {
-		// tries to close the storage
-		if err := s.storage.Close(); err != nil {
-			log.Ctx(s.ctx).Error().Err(err).Msg("Failed to close storage")
-		} else {
-			log.Ctx(s.ctx).Warn().Msg("Storage closed gracefully")
-		}
-	}(s)
-	// inform Fiber about our intention to shut down. This allows it to gracefully shutdown
-	// (with a grace period of 3 seconds for currently executing requests)
-	return s.app.ShutdownWithTimeout(3 * time.Second)
+	// Run Server and shtudown on context cancel
+	grp, runCtx := errgroup.WithContext(ctx)
+	grp.Go(func() error {
+		log.Ctx(ctx).Info().Int("port", s.port).Msg("Starting server")
+		return s.app.Listen(":" + strconv.Itoa(s.port))
+	})
+	grp.Go(func() error {
+		<-runCtx.Done()
+
+		log.Ctx(ctx).Warn().Msg("Shutting down fiber app")
+		shutDownErr := s.app.ShutdownWithTimeout(10 * time.Second)
+
+		log.Ctx(ctx).Warn().Msg("Closign storage")
+		storageErr := s.storage.Close()
+
+		return errors.Join(shutDownErr, storageErr)
+	})
+
+	return grp.Wait()
 }
 
 // Test should be called to test an API endpoint. This will relay the call to fiber app.Test() method. (TESTING)

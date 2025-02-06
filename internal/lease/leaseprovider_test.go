@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	clocktesting "k8s.io/utils/clock/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/pointer" //nolint
 )
 
 func TestNewLeaseProvider(t *testing.T) {

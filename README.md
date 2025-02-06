@@ -1,5 +1,5 @@
 # mq-lease-service
-> A priority mutex with stabilisation window and TTLs, designed to work with the Github MergeQueue accessing a shared resource
+> A priority mutex with stabilisation window and TTLs, designed to work with the Github MergeQueue accessing a shared resource.
 
 ## Contributing
 

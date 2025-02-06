@@ -3,8 +3,8 @@ package e2e_test
 import (
 	"github.com/ankorstore/mq-lease-service/e2e/helpers/config"
 	"github.com/ankorstore/mq-lease-service/internal/config/server/latest"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2" //nolint
+	. "github.com/onsi/gomega" //nolint
 )
 
 var _ = Describe("Config", Ordered, func() {

@@ -57,7 +57,7 @@ func TestLoadServerConfig(t *testing.T) {
 		t.Errorf("Could not load config, %v", err)
 	}
 	if cmp.Equal(got, expected) {
-		t.Errorf(cmp.Diff(got, err))
+		t.Errorf("%s", cmp.Diff(got, err)) //nolint
 	}
 
 	cleanup(yamlFileName)

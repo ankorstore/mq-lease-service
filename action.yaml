@@ -1,0 +1,111 @@
+name: MQ Lease Service
+description: "Interact with the mq-lease-service to have a priority-mutex/deduplication mechanism"
+inputs:
+  lease_service_url:
+    description: "URL of the lease service"
+    required: true
+  release_with_status:
+    description: "If set, release a previously acquired lease with the given status"
+    required: false
+    default: ""
+  auth:
+    description: "Authorization header to use for the lease service"
+    required: false
+    default: ""
+outputs:
+  status:
+    value: "${{ steps.acquire.outputs.status }}"
+    description: "Lease Status"
+  stacked_pull_requests:
+    value: "${{ steps.acquire.outputs.stacked_pull_requests }}"
+    description: "Stacked Pull Requests"
+runs:
+  using: "composite"
+  steps:
+    - name: retrieve status for merge group
+      shell: bash
+      id: status
+      env:
+        MERGE_GROUP_BASE_SHA: "${{ github.event.merge_group.base_sha }}"
+        MERGE_GROUP_HEAD_SHA: "${{ github.event.merge_group.head_sha }}"
+        MERGE_GROUP_BASE_REF: "${{ github.event.merge_group.base_ref }}"
+        MERGE_GROUP_HEAD_REF: "${{ github.event.merge_group.head_ref }}"
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -eux
+        # Determine merge group priority
+        echo "merge_group_priority=$(
+          gh api "/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/compare/${MERGE_GROUP_BASE_SHA}...${MERGE_GROUP_HEAD_SHA}" \
+          | jq -r '.ahead_by'
+        )" >> "$GITHUB_OUTPUT"
+
+        echo "merge_group_base_branch=${MERGE_GROUP_BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
+        echo "merge_group_head_branch=${MERGE_GROUP_HEAD_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
+
+
+    # Try to acquire the lease
+    - name: acquire
+      id: acquire
+      if: ${{ inputs.release_with_status == '' }}
+      shell: bash
+      env:
+        LEASE_API_ENDPOINT: "${{ inputs.lease_service_url }}/${{ github.repository }}/${{ steps.status.outputs.merge_group_base_branch }}"
+        AUTH_HEADER_VALUE: "${{ inputs.auth }}"
+        HEAD_SHA: "${{ github.event.merge_group.head_sha }}"
+        BASE_BRANCH: "${{ steps.status.outputs.merge_group_base_branch }}"
+        HEAD_BRANCH: "${{ steps.status.outputs.merge_group_head_branch }}"
+        PRIORITY: "${{ steps.status.outputs.merge_group_priority }}"
+      run: |
+        while true; do
+          echo "[ ] Trying to acquire lease"
+          resp=$(curl -H"Content-Type: json" -H"Authorization: ${AUTH_HEADER_VALUE}" -X POST -d "{\"head_sha\": \"${HEAD_SHA}\", \"head_ref\": \"${HEAD_BRANCH}\", \"priority\": ${PRIORITY}}" "{$LEASE_API_ENDPOINT}/acquire")
+          if [[ $? -ne 0 ]]; then
+            echo "[-] Failed to contact lease service (${resp}), retrying"
+            sleep 5
+            continue
+          fi
+          status=$(echo "$resp" | jq -r '.request.status')
+          error=$(echo "$resp" | jq -r '.error')
+
+          if [[ "$error" != "null" ]]; then
+            echo "[-] Unable to aquire lease: $error, retrying"
+            sleep 15
+            continue
+          fi
+
+          if [[ "$status" == "pending" ]]; then
+            echo "[+] Lease pending, retrying"
+            sleep 15
+            continue
+          fi
+
+          echo "[+] Lease status: $status"
+
+          # Retrieve stacked pullrequest for better communication at later stages
+          stacked_pull_requests=$(echo "$resp" | jq -c '.stacked_pull_requests')
+          # Report to output
+          echo "status=$status" >> "${GITHUB_OUTPUT}"
+          echo "stacked_pull_requests=$stacked_pull_requests" >> "${GITHUB_OUTPUT}"
+          break
+        done
+
+    - name: release
+      id: release
+      if: ${{ inputs.release_with_status != '' }}
+      shell: bash
+      env:
+        LEASE_API_ENDPOINT: "${{ inputs.lease_service_url }}/${{ github.repository }}/${{ steps.status.outputs.merge_group_base_branch }}"
+        AUTH_HEADER_VALUE: "${{ inputs.auth }}"
+        HEAD_SHA: "${{ github.event.merge_group.head_sha }}"
+        BASE_BRANCH: "${{ steps.status.outputs.merge_group_base_branch }}"
+        HEAD_BRANCH: "${{ steps.status.outputs.merge_group_head_branch }}"
+        PRIORITY: "${{ steps.status.outputs.merge_group_priority }}"
+        STATUS: "${{ inputs.release_with_status }}"
+      run: |
+        resp=$(curl -H"Content-Type: json" --fail-with-body -H"Authorization: ${AUTH_HEADER_VALUE}" -X POST -d "{\"head_sha\": \"${HEAD_SHA}\", \"head_ref\": \"${HEAD_BRANCH}\", \"priority\": ${PRIORITY}, \"status\": \"${STATUS}\"}" "${LEASE_API_ENDPOINT}/release")
+        if [ $? -eq 0 ]; then
+          echo "[+] Updated lease status: $RELEASE_WITH_STATUS"
+        else
+          echo "[!] Failed to update lease status - merge queue may be stuck"
+          echo "$resp"
+        fi

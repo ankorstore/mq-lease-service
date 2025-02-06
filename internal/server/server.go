@@ -16,6 +16,7 @@ import (
 	"github.com/ankorstore/mq-lease-service/internal/storage"
 	"github.com/ankorstore/mq-lease-service/internal/version"
 	"github.com/gofiber/fiber/v2"
+	fiberbasicauth "github.com/gofiber/fiber/v2/middleware/basicauth"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
@@ -140,6 +141,14 @@ func (s *serverImpl) Init() error {
 			log.Ctx(c.UserContext()).Error().Msgf("panic: %v\n%s", e, debug.Stack())
 		},
 	}))
+
+	// Configure basic auth if needed
+	if cfg.AuthConfig != nil && cfg.AuthConfig.BasicAuth != nil {
+		log.Ctx(s.ctx).Info().Msg("Basic auth enabled")
+		s.app.Use(fiberbasicauth.New(fiberbasicauth.Config{
+			Users: cfg.AuthConfig.BasicAuth.Users,
+		}))
+	}
 
 	// register k8s probes handlers
 	RegisterK8sProbesRoutes(s.app, s.storage)

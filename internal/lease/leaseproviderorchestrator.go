@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/config/server/latest"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/metrics"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/storage"
+	"github.com/ankorstore/mq-lease-service/internal/config/server/latest"
+	"github.com/ankorstore/mq-lease-service/internal/metrics"
+	"github.com/ankorstore/mq-lease-service/internal/storage"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 )

@@ -1,7 +1,7 @@
 ## Build
 FROM golang:1.19-alpine AS build
 
-ARG MODULE_NAME=github.com/ankorstore/gh-action-mq-lease-service
+ARG MODULE_NAME=github.com/ankorstore/mq-lease-service
 ARG BIN_NAME=server
 
 ARG SHA

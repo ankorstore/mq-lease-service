@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/storage"
+	"github.com/ankorstore/mq-lease-service/internal/storage"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"k8s.io/utils/clock"

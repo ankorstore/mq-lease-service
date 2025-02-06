@@ -1,4 +1,4 @@
-# gh-action-mq-lease-service
+# mq-lease-service
 > A priority mutex with stabilisation window and TTLs, designed to work with the Github MergeQueue accessing a shared resource
 
 ## Contributing
@@ -210,7 +210,7 @@ jobs:
       uses: actions/checkout@v3
     - name: Aquire lease
       id: acquire_lease
-      uses: ankorstore/gh-action-mq-lease-service@main
+      uses: ankorstore/mq-lease-service@main
       with:
         # Endpoint to connect to
         endpoint: https://your.lease.service.com

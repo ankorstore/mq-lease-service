@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/metrics"
+	"github.com/ankorstore/mq-lease-service/internal/metrics"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/prometheus/client_golang/prometheus"

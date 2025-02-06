@@ -4,8 +4,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/config"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/config/server/latest"
+	"github.com/ankorstore/mq-lease-service/internal/config"
+	"github.com/ankorstore/mq-lease-service/internal/config/server/latest"
 )
 
 // Default values used in the env vars (which are exploited in the default configuration placeholders)

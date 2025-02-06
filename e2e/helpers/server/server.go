@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/ankorstore/gh-action-mq-lease-service/e2e/helpers/logger"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/server"
+	"github.com/ankorstore/mq-lease-service/e2e/helpers/logger"
+	"github.com/ankorstore/mq-lease-service/internal/server"
 	"k8s.io/utils/clock"
 )
 

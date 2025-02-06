@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/lease"
+	"github.com/ankorstore/mq-lease-service/internal/lease"
 	"github.com/gofiber/fiber/v2"
 )
 

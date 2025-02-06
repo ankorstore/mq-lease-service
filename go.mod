@@ -1,4 +1,4 @@
-module github.com/ankorstore/gh-action-mq-lease-service
+module github.com/ankorstore/mq-lease-service
 
 go 1.19
 

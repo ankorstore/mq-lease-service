@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/lease"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/storage"
+	"github.com/ankorstore/mq-lease-service/internal/lease"
+	"github.com/ankorstore/mq-lease-service/internal/storage"
 )
 
 type Helper struct {

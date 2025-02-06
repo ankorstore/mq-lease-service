@@ -6,9 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/server"
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/version"
-	"github.com/ankorstore/gh-action-mq-lease-service/pkg/util/logger"
+	"github.com/ankorstore/mq-lease-service/internal/server"
+	"github.com/ankorstore/mq-lease-service/internal/version"
+	"github.com/ankorstore/mq-lease-service/pkg/util/logger"
 )
 
 var (

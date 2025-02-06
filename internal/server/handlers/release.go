@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/lease"
+	"github.com/ankorstore/mq-lease-service/internal/lease"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"

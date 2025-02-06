@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 
-	"github.com/ankorstore/gh-action-mq-lease-service/internal/config/server/latest"
+	"github.com/ankorstore/mq-lease-service/internal/config/server/latest"
 	"github.com/drone/envsubst/v2"
 	"gopkg.in/yaml.v3"
 )

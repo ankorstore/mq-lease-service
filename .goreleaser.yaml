@@ -1,0 +1,13 @@
+project_name: mq-lease-service
+
+kos:
+- repository: ghcr.io/ankorstore/mq-lease-service
+  main: ./cmd/
+  platforms:
+  - linux/amd64
+  - linux/arm64
+  bare: true
+  tags:
+  - latest
+  - '{{.Tag}}'
+  - '{{if not .Prerelease}}stable{{end}}'

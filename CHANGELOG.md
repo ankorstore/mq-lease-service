@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/ankorstore/mq-lease-service/compare/v1.0.0...v1.0.1) (2025-02-13)
+
+
+### Bug Fixes
+
+* goreleaser ([#2](https://github.com/ankorstore/mq-lease-service/issues/2)) ([a78007f](https://github.com/ankorstore/mq-lease-service/commit/a78007f67223a5d6296d557ec9d34432774addb8))
+
 ## 1.0.0 (2025-02-13)
 
 

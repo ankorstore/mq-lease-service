@@ -1,8 +1,0 @@
-creation_rules:
-  - path_regex: secrets/production/.*\.yaml$
-    encrypted_regex: ^(data|stringData)$
-    gcp_kms: projects/tfstates-7c3f/locations/europe-west1/keyRings/sops/cryptoKeys/prod
-
-  - path_regex: secrets/.*/.*\.yaml$
-    encrypted_regex: ^(data|stringData)$
-    gcp_kms: projects/tfstates-7c3f/locations/europe-west1/keyRings/sops/cryptoKeys/non-prod

@@ -1,8 +1,22 @@
 project_name: mq-lease-service
+version: 2
+
+builds:
+  - id: mq-lease-service
+    env:
+    - CGO_ENABLED=0
+    goos:
+    - linux
+    goarch:
+    - arm64
+    - amd64
+    binary: mq-lease-service
+    main: ./cmd
 
 kos:
-- repository: ghcr.io/ankorstore/mq-lease-service
-  main: ./cmd/
+- repositories:
+  - ghcr.io/ankorstore/mq-lease-service
+  main: ./cmd
   platforms:
   - linux/amd64
   - linux/arm64
